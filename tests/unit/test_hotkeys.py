@@ -8,6 +8,7 @@ from ai_clip.hotkeys import (
     _find_next_slot,
     _get_existing_keybinding_slots,
     _run_dconf,
+    _update_custom_list,
     _write_keybinding,
     register_hotkeys,
 )
@@ -102,6 +103,38 @@ class TestBuildCommandString:
         assert '--command "Fix"' in result
 
 
+class TestUpdateCustomList:
+    def test_adds_new_entries(self):
+        base = "/org/cinnamon/desktop/keybindings/custom-keybindings"
+        slots = [f"{base}/custom3/", f"{base}/custom4/"]
+        with patch("ai_clip.hotkeys._run_dconf") as mock_dconf:
+            mock_dconf.return_value = "['custom0', 'custom1']"
+            _update_custom_list(slots)
+        write_call = mock_dconf.call_args_list[-1]
+        written = write_call[0][0][-1]
+        assert "custom3" in written
+        assert "custom4" in written
+        assert "custom0" in written
+
+    def test_empty_existing(self):
+        base = "/org/cinnamon/desktop/keybindings/custom-keybindings"
+        with patch("ai_clip.hotkeys._run_dconf") as mock_dconf:
+            mock_dconf.return_value = ""
+            _update_custom_list([f"{base}/custom0/"])
+        write_call = mock_dconf.call_args_list[-1]
+        written = write_call[0][0][-1]
+        assert "custom0" in written
+
+    def test_no_duplicates(self):
+        base = "/org/cinnamon/desktop/keybindings/custom-keybindings"
+        with patch("ai_clip.hotkeys._run_dconf") as mock_dconf:
+            mock_dconf.return_value = "['custom0']"
+            _update_custom_list([f"{base}/custom0/"])
+        write_call = mock_dconf.call_args_list[-1]
+        written = write_call[0][0][-1]
+        assert written.count("custom0") == 1
+
+
 class TestRegisterHotkeys:
     def test_registers_main_and_pinned(self, capsys):
         config = _make_config()
@@ -109,6 +142,7 @@ class TestRegisterHotkeys:
             patch("ai_clip.hotkeys._get_existing_keybinding_slots", return_value=[]),
             patch("ai_clip.hotkeys._write_keybinding") as mock_write,
             patch("ai_clip.hotkeys._run_dconf"),
+            patch("ai_clip.hotkeys._update_custom_list"),
         ):
             register_hotkeys(config)
 
@@ -122,6 +156,7 @@ class TestRegisterHotkeys:
             patch("ai_clip.hotkeys._get_existing_keybinding_slots", return_value=[]),
             patch("ai_clip.hotkeys._write_keybinding") as mock_write,
             patch("ai_clip.hotkeys._run_dconf"),
+            patch("ai_clip.hotkeys._update_custom_list"),
         ):
             register_hotkeys(config)
         assert mock_write.call_count == 1
@@ -133,6 +168,7 @@ class TestRegisterHotkeys:
             patch("ai_clip.hotkeys._get_existing_keybinding_slots", return_value=existing),
             patch("ai_clip.hotkeys._write_keybinding"),
             patch("ai_clip.hotkeys._run_dconf") as mock_dconf,
+            patch("ai_clip.hotkeys._update_custom_list"),
         ):
             register_hotkeys(config)
         final_call = mock_dconf.call_args_list[-1]

@@ -6,6 +6,7 @@ from ai_clip.ai_client import AIClientError
 from ai_clip.clipboard import ClipboardError
 from ai_clip.config import AppConfig, PinnedCommand
 from ai_clip.orchestrator import (
+    _capture_selected_text,
     _do_transform,
     _execute_transform,
     _find_prompt_for_command,
@@ -27,6 +28,34 @@ def _make_config(**overrides):
     }
     defaults.update(overrides)
     return AppConfig(**defaults)
+
+
+class TestCaptureSelectedText:
+    def test_uses_primary_selection(self):
+        with patch("ai_clip.orchestrator.read_primary_selection", return_value="selected"):
+            result = _capture_selected_text()
+        assert result == "selected"
+
+    def test_falls_back_to_ctrl_c(self):
+        with (
+            patch("ai_clip.orchestrator.read_primary_selection", return_value=""),
+            patch("ai_clip.orchestrator.simulate_copy"),
+            patch("ai_clip.orchestrator.read_clipboard", return_value="copied"),
+        ):
+            result = _capture_selected_text()
+        assert result == "copied"
+
+    def test_falls_back_on_primary_error(self):
+        with (
+            patch(
+                "ai_clip.orchestrator.read_primary_selection",
+                side_effect=ClipboardError("fail"),
+            ),
+            patch("ai_clip.orchestrator.simulate_copy"),
+            patch("ai_clip.orchestrator.read_clipboard", return_value="copied"),
+        ):
+            result = _capture_selected_text()
+        assert result == "copied"
 
 
 class TestFindPromptForCommand:
@@ -118,8 +147,7 @@ class TestRunWithPicker:
             patch("ai_clip.orchestrator.load_config", return_value=_make_config()),
             patch("ai_clip.orchestrator.load_history", return_value=MagicMock()),
             patch("ai_clip.orchestrator.build_command_list", return_value=[]),
-            patch("ai_clip.orchestrator.simulate_copy"),
-            patch("ai_clip.orchestrator.read_clipboard", return_value="hello"),
+            patch("ai_clip.orchestrator._capture_selected_text", return_value="hello"),
             patch(
                 "ai_clip.orchestrator.show_picker",
                 return_value=PickerResult(command="Fix"),
@@ -135,7 +163,10 @@ class TestRunWithPicker:
             patch("ai_clip.orchestrator.load_config", return_value=_make_config()),
             patch("ai_clip.orchestrator.load_history", return_value=MagicMock()),
             patch("ai_clip.orchestrator.build_command_list", return_value=[]),
-            patch("ai_clip.orchestrator.simulate_copy", side_effect=ClipboardError("fail")),
+            patch(
+                "ai_clip.orchestrator._capture_selected_text",
+                side_effect=ClipboardError("fail"),
+            ),
         ):
             result = run_with_picker(tmp_path / "c.toml")
         assert result is False
@@ -145,8 +176,7 @@ class TestRunWithPicker:
             patch("ai_clip.orchestrator.load_config", return_value=_make_config()),
             patch("ai_clip.orchestrator.load_history", return_value=MagicMock()),
             patch("ai_clip.orchestrator.build_command_list", return_value=[]),
-            patch("ai_clip.orchestrator.simulate_copy"),
-            patch("ai_clip.orchestrator.read_clipboard", return_value="  "),
+            patch("ai_clip.orchestrator._capture_selected_text", return_value="  "),
         ):
             result = run_with_picker(tmp_path / "c.toml")
         assert result is False
@@ -156,8 +186,7 @@ class TestRunWithPicker:
             patch("ai_clip.orchestrator.load_config", return_value=_make_config()),
             patch("ai_clip.orchestrator.load_history", return_value=MagicMock()),
             patch("ai_clip.orchestrator.build_command_list", return_value=[]),
-            patch("ai_clip.orchestrator.simulate_copy"),
-            patch("ai_clip.orchestrator.read_clipboard", return_value="hello"),
+            patch("ai_clip.orchestrator._capture_selected_text", return_value="hello"),
             patch(
                 "ai_clip.orchestrator.show_picker",
                 return_value=PickerResult(command="", cancelled=True),
@@ -172,8 +201,7 @@ class TestRunDirectCommand:
         with (
             patch("ai_clip.orchestrator.load_config", return_value=_make_config()),
             patch("ai_clip.orchestrator.load_history", return_value=MagicMock()),
-            patch("ai_clip.orchestrator.simulate_copy"),
-            patch("ai_clip.orchestrator.read_clipboard", return_value="hello"),
+            patch("ai_clip.orchestrator._capture_selected_text", return_value="hello"),
             patch("ai_clip.orchestrator._execute_transform", return_value=True) as mock_exec,
         ):
             result = run_direct_command("Translate", tmp_path / "c.toml")
@@ -184,7 +212,10 @@ class TestRunDirectCommand:
         with (
             patch("ai_clip.orchestrator.load_config", return_value=_make_config()),
             patch("ai_clip.orchestrator.load_history", return_value=MagicMock()),
-            patch("ai_clip.orchestrator.simulate_copy", side_effect=ClipboardError("fail")),
+            patch(
+                "ai_clip.orchestrator._capture_selected_text",
+                side_effect=ClipboardError("fail"),
+            ),
         ):
             result = run_direct_command("Translate", tmp_path / "c.toml")
         assert result is False
@@ -193,8 +224,7 @@ class TestRunDirectCommand:
         with (
             patch("ai_clip.orchestrator.load_config", return_value=_make_config()),
             patch("ai_clip.orchestrator.load_history", return_value=MagicMock()),
-            patch("ai_clip.orchestrator.simulate_copy"),
-            patch("ai_clip.orchestrator.read_clipboard", return_value=""),
+            patch("ai_clip.orchestrator._capture_selected_text", return_value=""),
         ):
             result = run_direct_command("Translate", tmp_path / "c.toml")
         assert result is False

@@ -10,6 +10,7 @@ from ai_clip.clipboard import (
     _detect_session_type,
     _run,
     read_clipboard,
+    read_primary_selection,
     simulate_copy,
     simulate_paste,
     write_clipboard,
@@ -102,22 +103,78 @@ class TestReadClipboard:
             mock.assert_called_once_with(["wl-paste", "--no-newline"])
 
 
-class TestWriteClipboard:
+class TestReadPrimarySelection:
     def test_x11(self):
         with (
             patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
-            patch("ai_clip.clipboard._run") as mock,
+            patch("ai_clip.clipboard._run", return_value="primary text") as mock,
         ):
-            write_clipboard("hello")
-            mock.assert_called_once_with(["xclip", "-selection", "clipboard"], input_data=b"hello")
+            result = read_primary_selection()
+            assert result == "primary text"
+            mock.assert_called_once_with(["xclip", "-selection", "primary", "-o"])
 
     def test_wayland(self):
         with (
             patch("ai_clip.clipboard._detect_session_type", return_value="wayland"),
-            patch("ai_clip.clipboard._run") as mock,
+            patch("ai_clip.clipboard._run", return_value="wayland primary\n") as mock,
+        ):
+            result = read_primary_selection()
+            assert result == "wayland primary"
+            mock.assert_called_once_with(["wl-paste", "--primary", "--no-newline"])
+
+
+class TestWriteClipboard:
+    def test_x11(self):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        with (
+            patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
+            patch("ai_clip.clipboard.subprocess.Popen", return_value=mock_proc) as mock_popen,
         ):
             write_clipboard("hello")
-            mock.assert_called_once_with(["wl-copy"], input_data=b"hello")
+            mock_popen.assert_called_once_with(
+                ["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE
+            )
+            mock_proc.communicate.assert_called_once_with(input=b"hello", timeout=5)
+
+    def test_wayland(self):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        with (
+            patch("ai_clip.clipboard._detect_session_type", return_value="wayland"),
+            patch("ai_clip.clipboard.subprocess.Popen", return_value=mock_proc) as mock_popen,
+        ):
+            write_clipboard("hello")
+            mock_popen.assert_called_once_with(["wl-copy"], stdin=subprocess.PIPE)
+
+    def test_command_not_found(self):
+        with (
+            patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
+            patch("ai_clip.clipboard.subprocess.Popen", side_effect=FileNotFoundError),
+            pytest.raises(ClipboardError, match="Command not found"),
+        ):
+            write_clipboard("hello")
+
+    def test_timeout(self):
+        mock_proc = MagicMock()
+        mock_proc.communicate.side_effect = subprocess.TimeoutExpired(cmd="xclip", timeout=5)
+        with (
+            patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
+            patch("ai_clip.clipboard.subprocess.Popen", return_value=mock_proc),
+            pytest.raises(ClipboardError, match="timed out"),
+        ):
+            write_clipboard("hello")
+        mock_proc.kill.assert_called_once()
+
+    def test_nonzero_return(self):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+        with (
+            patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
+            patch("ai_clip.clipboard.subprocess.Popen", return_value=mock_proc),
+            pytest.raises(ClipboardError, match="failed"),
+        ):
+            write_clipboard("hello")
 
 
 class TestSimulateCopy:
@@ -129,7 +186,7 @@ class TestSimulateCopy:
         ):
             simulate_copy()
             mock_run.assert_called_once_with(["xdotool", "key", "--delay", "50", "ctrl+c"])
-            mock_sleep.assert_called_once_with(0.15)
+            mock_sleep.assert_called_once_with(0.3)
 
     def test_wayland(self):
         with (
@@ -139,7 +196,7 @@ class TestSimulateCopy:
         ):
             simulate_copy()
             mock_run.assert_called_once_with(["ydotool", "key", "29:1", "46:1", "46:0", "29:0"])
-            mock_sleep.assert_called_once_with(0.15)
+            mock_sleep.assert_called_once_with(0.3)
 
 
 class TestSimulatePaste:
@@ -151,7 +208,7 @@ class TestSimulatePaste:
         ):
             simulate_paste()
             mock_run.assert_called_once_with(["xdotool", "key", "--delay", "50", "ctrl+v"])
-            mock_sleep.assert_called_once_with(0.15)
+            mock_sleep.assert_called_once_with(0.3)
 
     def test_wayland(self):
         with (
@@ -161,4 +218,4 @@ class TestSimulatePaste:
         ):
             simulate_paste()
             mock_run.assert_called_once_with(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"])
-            mock_sleep.assert_called_once_with(0.15)
+            mock_sleep.assert_called_once_with(0.3)

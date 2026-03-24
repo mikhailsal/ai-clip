@@ -9,7 +9,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-COPY_PASTE_DELAY = 0.15
+COPY_PASTE_DELAY = 0.3
 XDOTOOL_KEY_DELAY = 50
 
 
@@ -60,14 +60,34 @@ def read_clipboard() -> str:
     return _run(["xclip", "-selection", "clipboard", "-o"])
 
 
+def read_primary_selection() -> str:
+    """Read the X11 primary selection (highlighted text, no Ctrl+C needed)."""
+    session = _detect_session_type()
+    if session == "wayland":
+        return _run(["wl-paste", "--primary", "--no-newline"]).rstrip("\n")
+    return _run(["xclip", "-selection", "primary", "-o"])
+
+
 def write_clipboard(text: str) -> None:
-    """Write text to system clipboard."""
+    """Write text to system clipboard.
+
+    Uses Popen+communicate instead of subprocess.run because xclip stays
+    alive to serve clipboard requests -- subprocess.run with capture_output
+    causes a timeout.
+    """
     session = _detect_session_type()
     data = text.encode()
-    if session == "wayland":
-        _run(["wl-copy"], input_data=data)
-    else:
-        _run(["xclip", "-selection", "clipboard"], input_data=data)
+    cmd = ["wl-copy"] if session == "wayland" else ["xclip", "-selection", "clipboard"]
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        proc.communicate(input=data, timeout=5)
+    except FileNotFoundError as exc:
+        raise ClipboardError(f"Command not found: {cmd[0]}") from exc
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        raise ClipboardError(f"Command timed out: {' '.join(cmd)}") from exc
+    if proc.returncode != 0:
+        raise ClipboardError(f"{cmd[0]} failed (rc={proc.returncode})")
 
 
 def simulate_copy() -> None:

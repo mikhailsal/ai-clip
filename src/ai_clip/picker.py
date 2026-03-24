@@ -49,6 +49,7 @@ def _import_gtk():  # pragma: no cover
     import gi
 
     gi.require_version("Gtk", "4.0")
+    gi.require_version("Gdk", "4.0")
     from gi.repository import Gdk, GLib, Gtk  # noqa: N812
 
     return Gtk, Gdk, GLib
@@ -83,7 +84,8 @@ def _build_ui(gtk, window):
     scrolled.set_child(listbox)
     box.append(scrolled)
 
-    hint = gtk.Label(label="Ctrl+1..9: quick select | Enter: confirm | Escape: cancel")
+    hint_text = "Ctrl+1..9: select | Enter: confirm | Ctrl+Enter: send typed | Esc: cancel"
+    hint = gtk.Label(label=hint_text)
     hint.set_xalign(0)
     hint.add_css_class("dim-label")
     box.append(hint)
@@ -132,35 +134,80 @@ def _handle_keypress(keyval, state, ctx: _KeyContext):
         ctx.cancel_fn()
         return True
 
-    if ctrl and ctx.gdk.KEY_1 <= keyval <= ctx.gdk.KEY_9:
+    if ctrl:
+        return _handle_ctrl_key(keyval, ctx)
+
+    if keyval in (ctx.gdk.KEY_Return, ctx.gdk.KEY_KP_Enter):
+        return _handle_enter(ctx)
+
+    if keyval == ctx.gdk.KEY_Down:
+        return _navigate_list(ctx, direction=1)
+
+    if keyval == ctx.gdk.KEY_Up:
+        return _navigate_list(ctx, direction=-1)
+
+    return False
+
+
+def _handle_ctrl_key(keyval, ctx: _KeyContext) -> bool:
+    """Handle Ctrl+key combinations: Ctrl+1..9 for quick select, Ctrl+Enter for raw text."""
+    if ctx.gdk.KEY_1 <= keyval <= ctx.gdk.KEY_9:
         idx = keyval - ctx.gdk.KEY_1
         if idx < len(ctx.visible_commands):
             ctx.submit_fn(ctx.visible_commands[idx].label)
         return True
 
     if keyval in (ctx.gdk.KEY_Return, ctx.gdk.KEY_KP_Enter):
-        return _handle_enter(ctx)
-
-    if keyval in (ctx.gdk.KEY_Down, ctx.gdk.KEY_Up):
-        ctx.listbox.grab_focus()
-        return False
+        return _handle_ctrl_enter(ctx)
 
     return False
 
 
-def _handle_enter(ctx: _KeyContext) -> bool:
-    """Handle Enter key: submit entry text, selected row, or first item."""
+def _handle_ctrl_enter(ctx: _KeyContext) -> bool:
+    """Handle Ctrl+Enter: always submit the raw entry text as a custom command."""
     text = ctx.entry.get_text().strip()
     if text:
         ctx.submit_fn(text)
+    return True
+
+
+def _navigate_list(ctx: _KeyContext, direction: int) -> bool:
+    """Move selection in the listbox. direction: +1 for down, -1 for up.
+
+    Keeps focus on the entry so the user can type at any time while
+    navigating the list with arrows.
+    """
+    selected = ctx.listbox.get_selected_row()
+    if selected is None:
+        target_idx = 0 if direction == 1 else len(ctx.visible_commands) - 1
     else:
-        row = ctx.listbox.get_selected_row()
-        if row is not None:
-            idx = row.get_index()
-            if idx < len(ctx.visible_commands):
-                ctx.submit_fn(ctx.visible_commands[idx].label)
-        elif ctx.visible_commands:
-            ctx.submit_fn(ctx.visible_commands[0].label)
+        target_idx = selected.get_index() + direction
+    target_row = ctx.listbox.get_row_at_index(target_idx)
+    if target_row:
+        ctx.listbox.select_row(target_row)
+    return True
+
+
+def _handle_enter(ctx: _KeyContext) -> bool:
+    """Handle Enter key: prefer selected/filtered item, fall back to entry text.
+
+    Priority: selected row > first visible command (if filter matches) > raw entry text.
+    This way typing a filter like "imp" selects "Improve style" rather than submitting "imp".
+    """
+    row = ctx.listbox.get_selected_row()
+    if row is not None:
+        idx = row.get_index()
+        if idx < len(ctx.visible_commands):
+            ctx.submit_fn(ctx.visible_commands[idx].label)
+            return True
+
+    if ctx.visible_commands:
+        ctx.submit_fn(ctx.visible_commands[0].label)
+        return True
+
+    text = ctx.entry.get_text().strip()
+    if text:
+        ctx.submit_fn(text)
     return True
 
 
@@ -178,10 +225,57 @@ def show_picker(commands: list[CommandItem]) -> PickerResult:
     return _run_picker_app(gtk, gdk, commands)
 
 
+def _connect_picker_events(gtk, gdk, window, widgets, commands, state):  # pragma: no cover
+    """Wire up all event handlers for the picker window."""
+    entry, listbox = widgets["entry"], widgets["listbox"]
+    visible_ref = state["visible_ref"]
+
+    def submit_fn(command: str):
+        state["result"] = PickerResult(command=command)
+        window.close()
+
+    def cancel_fn():
+        state["result"] = PickerResult(command="", cancelled=True)
+        window.close()
+
+    def on_changed(_entry):
+        visible_ref[0] = filter_commands(commands, entry.get_text().strip())
+        _populate_listbox(gtk, listbox, visible_ref[0])
+
+    entry.connect("changed", on_changed)
+
+    ctx = _KeyContext(
+        gdk=gdk,
+        entry=entry,
+        listbox=listbox,
+        visible_commands=visible_ref[0],
+        submit_fn=submit_fn,
+        cancel_fn=cancel_fn,
+    )
+
+    def on_entry_activate(_entry):
+        ctx.visible_commands = visible_ref[0]
+        _handle_enter(ctx)
+
+    entry.connect("activate", on_entry_activate)
+
+    def on_key(_controller, keyval, _keycode, kstate):
+        ctx.visible_commands = visible_ref[0]
+        return _handle_keypress(keyval, kstate, ctx)
+
+    entry_key_ctrl = gtk.EventControllerKey()
+    entry_key_ctrl.set_propagation_phase(gtk.PropagationPhase.CAPTURE)
+    entry_key_ctrl.connect("key-pressed", on_key)
+    entry.add_controller(entry_key_ctrl)
+
+    window_key_ctrl = gtk.EventControllerKey()
+    window_key_ctrl.connect("key-pressed", on_key)
+    window.add_controller(window_key_ctrl)
+
+
 def _run_picker_app(gtk, gdk, commands):  # pragma: no cover
     """Run the GTK4 picker application. Requires a live display."""
-    result_holder: list[PickerResult] = []
-    visible_commands_ref: list[list] = [commands[:MAX_VISIBLE_COMMANDS]]
+    state = {"result": None, "visible_ref": [commands[:MAX_VISIBLE_COMMANDS]]}
 
     class PickerApp(gtk.Application):
         def __init__(self):
@@ -194,56 +288,19 @@ def _run_picker_app(gtk, gdk, commands):  # pragma: no cover
             window.set_default_size(500, 400)
 
             widgets = _build_ui(gtk, window)
-            entry = widgets["entry"]
-            listbox = widgets["listbox"]
-
-            _populate_listbox(gtk, listbox, visible_commands_ref[0])
-
-            def submit_fn(command: str):
-                result_holder.append(PickerResult(command=command))
-                window.close()
-
-            def cancel_fn():
-                result_holder.append(PickerResult(command="", cancelled=True))
-                window.close()
-
-            def on_changed(_entry):
-                query = entry.get_text().strip()
-                visible_commands_ref[0] = filter_commands(commands, query)
-                _populate_listbox(gtk, listbox, visible_commands_ref[0])
-
-            entry.connect("changed", on_changed)
-
-            key_ctrl = gtk.EventControllerKey()
-
-            ctx = _KeyContext(
-                gdk=gdk,
-                entry=entry,
-                listbox=listbox,
-                visible_commands=visible_commands_ref[0],
-                submit_fn=submit_fn,
-                cancel_fn=cancel_fn,
-            )
-
-            def on_key(_controller, keyval, _keycode, state):
-                ctx.visible_commands = visible_commands_ref[0]
-                return _handle_keypress(keyval, state, ctx)
-
-            key_ctrl.connect("key-pressed", on_key)
-            window.add_controller(key_ctrl)
+            _populate_listbox(gtk, widgets["listbox"], state["visible_ref"][0])
+            _connect_picker_events(gtk, gdk, window, widgets, commands, state)
 
             window.present()
-            entry.grab_focus()
-
-            if listbox.get_row_at_index(0):
-                listbox.select_row(listbox.get_row_at_index(0))
+            widgets["entry"].grab_focus()
+            first_row = widgets["listbox"].get_row_at_index(0)
+            if first_row:
+                widgets["listbox"].select_row(first_row)
 
     app = PickerApp()
     app.run(None)
 
-    if result_holder:
-        return result_holder[0]
-    return PickerResult(command="", cancelled=True)
+    return state["result"] or PickerResult(command="", cancelled=True)
 
 
 def pick_command_headless(commands: list[CommandItem], index: int) -> PickerResult:

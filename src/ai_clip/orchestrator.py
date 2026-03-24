@@ -15,6 +15,7 @@ from ai_clip.ai_client import AIClientError, transform_text
 from ai_clip.clipboard import (
     ClipboardError,
     read_clipboard,
+    read_primary_selection,
     simulate_copy,
     simulate_paste,
     write_clipboard,
@@ -24,6 +25,23 @@ from ai_clip.history import build_command_list, load_history
 from ai_clip.picker import PickerResult, show_picker
 
 logger = logging.getLogger(__name__)
+
+
+def _capture_selected_text() -> str:
+    """Capture the currently selected text, trying primary selection first.
+
+    The X11 primary selection contains highlighted text without needing Ctrl+C.
+    Falls back to Ctrl+C if primary selection is empty.
+    """
+    try:
+        primary = read_primary_selection()
+        if primary.strip():
+            return primary
+    except ClipboardError:
+        pass
+
+    simulate_copy()
+    return read_clipboard()
 
 
 def _find_prompt_for_command(label: str, config: AppConfig) -> tuple[str, str | None]:
@@ -68,8 +86,7 @@ def run_with_picker(config_path: Path | None = None) -> bool:
     commands = build_command_list(config.pinned_commands, history)
 
     try:
-        simulate_copy()
-        original_text = read_clipboard()
+        original_text = _capture_selected_text()
     except ClipboardError as exc:
         logger.error("Failed to read clipboard: %s", exc)
         return False
@@ -95,8 +112,7 @@ def run_direct_command(command_label: str, config_path: Path | None = None) -> b
     history = load_history()
 
     try:
-        simulate_copy()
-        original_text = read_clipboard()
+        original_text = _capture_selected_text()
     except ClipboardError as exc:
         logger.error("Failed to read clipboard: %s", exc)
         return False

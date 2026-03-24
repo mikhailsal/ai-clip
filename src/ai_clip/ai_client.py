@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import logging
 
-from openai import OpenAI, OpenAIError
-
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
@@ -24,8 +22,10 @@ class AIClientError(Exception):
     """Raised when an AI API call fails."""
 
 
-def _build_client(api_key: str) -> OpenAI:
+def _build_client(api_key: str):
     """Create an OpenAI client configured for OpenRouter."""
+    from openai import OpenAI
+
     if not api_key:
         raise AIClientError("OpenRouter API key is not configured")
     return OpenAI(
@@ -73,7 +73,7 @@ def transform_text(
             messages=messages,
             timeout=timeout,
         )
-    except OpenAIError as exc:
+    except Exception as exc:
         raise AIClientError(f"API request failed: {exc}") from exc
 
     if not response.choices:

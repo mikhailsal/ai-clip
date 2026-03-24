@@ -15,8 +15,10 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DCONF_KEYBINDING_PATH = "/org/cinnamon/desktop/keybindings/custom-keybindings"
-DCONF_CUSTOM_BASE = "/org/cinnamon/desktop/keybindings/custom-keybindings/custom"
+DCONF_BASE = "/org/cinnamon/desktop/keybindings"
+DCONF_KEYBINDING_PATH = f"{DCONF_BASE}/custom-keybindings"
+DCONF_CUSTOM_LIST = f"{DCONF_BASE}/custom-list"
+DCONF_CUSTOM_BASE = f"{DCONF_KEYBINDING_PATH}/custom"
 
 
 def _run_dconf(args: list[str]) -> str:
@@ -99,4 +101,25 @@ def register_hotkeys(config: AppConfig) -> None:
     all_slots = list(set(existing + new_slots))
     slots_value = json.dumps(all_slots)
     _run_dconf(["write", DCONF_KEYBINDING_PATH, slots_value])
+
+    _update_custom_list(new_slots)
     print(f"Registered {len(new_slots)} hotkey(s) in Cinnamon")
+
+
+def _update_custom_list(new_slots: list[str]) -> None:
+    """Update the custom-list key with short names (e.g. 'custom0')."""
+    import contextlib
+
+    raw = _run_dconf(["read", DCONF_CUSTOM_LIST])
+    existing_list: list[str] = []
+    if raw:
+        with contextlib.suppress(json.JSONDecodeError, ValueError):
+            existing_list = json.loads(raw.replace("'", '"'))
+
+    for slot_path in new_slots:
+        short_name = slot_path.rstrip("/").rsplit("/", 1)[-1]
+        if short_name not in existing_list:
+            existing_list.append(short_name)
+
+    list_value = json.dumps(existing_list)
+    _run_dconf(["write", DCONF_CUSTOM_LIST, list_value])

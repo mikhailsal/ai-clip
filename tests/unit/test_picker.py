@@ -11,9 +11,12 @@ from ai_clip.history import CommandItem
 from ai_clip.picker import (
     MAX_VISIBLE_COMMANDS,
     PickerResult,
+    _handle_ctrl_enter,
+    _handle_ctrl_key,
     _handle_enter,
     _handle_keypress,
     _KeyContext,
+    _navigate_list,
     filter_commands,
     format_row_label,
     pick_command_headless,
@@ -177,23 +180,28 @@ class TestHandleKeypress:
         _handle_keypress(0x39, 0x4, ctx)
         ctx.submit_fn.assert_not_called()
 
-    def test_enter_submits_entry_text(self):
+    def test_enter_submits_entry_text_when_no_commands(self):
         ctx = _make_ctx(entry_text="custom command")
+        ctx.listbox.get_selected_row.return_value = None
         result = _handle_keypress(ctx.gdk.KEY_Return, 0, ctx)
         assert result is True
         ctx.submit_fn.assert_called_once_with("custom command")
 
-    def test_arrow_key_focuses_listbox(self):
-        ctx = _make_ctx()
+    def test_down_arrow_navigates(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items)
+        ctx.listbox.get_selected_row.return_value = None
         result = _handle_keypress(ctx.gdk.KEY_Down, 0, ctx)
-        assert result is False
-        ctx.listbox.grab_focus.assert_called_once()
+        assert result is True
+        ctx.listbox.select_row.assert_called_once()
 
-    def test_up_arrow_focuses_listbox(self):
-        ctx = _make_ctx()
+    def test_up_arrow_navigates(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items)
+        ctx.listbox.get_selected_row.return_value = None
         result = _handle_keypress(ctx.gdk.KEY_Up, 0, ctx)
-        assert result is False
-        ctx.listbox.grab_focus.assert_called_once()
+        assert result is True
+        ctx.listbox.select_row.assert_called_once()
 
     def test_unhandled_key(self):
         ctx = _make_ctx()
@@ -202,32 +210,154 @@ class TestHandleKeypress:
 
     def test_kp_enter_works(self):
         ctx = _make_ctx(entry_text="test")
+        ctx.listbox.get_selected_row.return_value = None
         _handle_keypress(ctx.gdk.KEY_KP_Enter, 0, ctx)
         ctx.submit_fn.assert_called_once_with("test")
 
-
-class TestHandleEnter:
-    def test_submits_entry_text(self):
-        ctx = _make_ctx(entry_text="hello")
-        result = _handle_enter(ctx)
+    def test_ctrl_enter_sends_raw_text(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items, entry_text="correct")
+        result = _handle_keypress(ctx.gdk.KEY_Return, 0x4, ctx)
         assert result is True
-        ctx.submit_fn.assert_called_once_with("hello")
+        ctx.submit_fn.assert_called_once_with("correct")
 
-    def test_submits_selected_row(self):
+
+class TestNavigateList:
+    def test_down_no_selection(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items)
+        ctx.listbox.get_selected_row.return_value = None
+        row_0 = MagicMock()
+        ctx.listbox.get_row_at_index.return_value = row_0
+        result = _navigate_list(ctx, direction=1)
+        assert result is True
+        ctx.listbox.get_row_at_index.assert_called_with(0)
+        ctx.listbox.select_row.assert_called_with(row_0)
+
+    def test_up_no_selection(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items)
+        ctx.listbox.get_selected_row.return_value = None
+        row_2 = MagicMock()
+        ctx.listbox.get_row_at_index.return_value = row_2
+        result = _navigate_list(ctx, direction=-1)
+        assert result is True
+        ctx.listbox.get_row_at_index.assert_called_with(2)
+        ctx.listbox.select_row.assert_called_with(row_2)
+
+    def test_down_from_existing_selection(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items)
+        row = MagicMock()
+        row.get_index.return_value = 0
+        ctx.listbox.get_selected_row.return_value = row
+        next_row = MagicMock()
+        ctx.listbox.get_row_at_index.return_value = next_row
+        _navigate_list(ctx, direction=1)
+        ctx.listbox.get_row_at_index.assert_called_with(1)
+        ctx.listbox.select_row.assert_called_with(next_row)
+
+    def test_up_from_existing_selection(self):
         items = _make_items(3)
         ctx = _make_ctx(visible_commands=items)
         row = MagicMock()
         row.get_index.return_value = 1
         ctx.listbox.get_selected_row.return_value = row
-        _handle_enter(ctx)
-        ctx.submit_fn.assert_called_once_with("Command 1")
+        prev_row = MagicMock()
+        ctx.listbox.get_row_at_index.return_value = prev_row
+        _navigate_list(ctx, direction=-1)
+        ctx.listbox.get_row_at_index.assert_called_with(0)
+        ctx.listbox.select_row.assert_called_with(prev_row)
 
-    def test_submits_first_when_no_selection(self):
+    def test_down_past_end(self):
         items = _make_items(3)
         ctx = _make_ctx(visible_commands=items)
+        row = MagicMock()
+        row.get_index.return_value = 2
+        ctx.listbox.get_selected_row.return_value = row
+        ctx.listbox.get_row_at_index.return_value = None
+        _navigate_list(ctx, direction=1)
+        ctx.listbox.select_row.assert_not_called()
+
+
+class TestHandleCtrlKey:
+    def test_ctrl_number_submits(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items)
+        result = _handle_ctrl_key(ctx.gdk.KEY_1, ctx)
+        assert result is True
+        ctx.submit_fn.assert_called_once_with("Command 0")
+
+    def test_ctrl_number_out_of_range(self):
+        items = _make_items(1)
+        ctx = _make_ctx(visible_commands=items)
+        _handle_ctrl_key(0x39, ctx)
+        ctx.submit_fn.assert_not_called()
+
+    def test_ctrl_enter_delegates(self):
+        ctx = _make_ctx(entry_text="raw text")
+        result = _handle_ctrl_key(ctx.gdk.KEY_Return, ctx)
+        assert result is True
+        ctx.submit_fn.assert_called_once_with("raw text")
+
+    def test_unhandled_ctrl_key(self):
+        ctx = _make_ctx()
+        result = _handle_ctrl_key(0x41, ctx)
+        assert result is False
+
+
+class TestHandleCtrlEnter:
+    def test_submits_entry_text(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items, entry_text="correct")
+        result = _handle_ctrl_enter(ctx)
+        assert result is True
+        ctx.submit_fn.assert_called_once_with("correct")
+
+    def test_ignores_list_selection(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items, entry_text="my custom cmd")
+        row = MagicMock()
+        row.get_index.return_value = 1
+        ctx.listbox.get_selected_row.return_value = row
+        _handle_ctrl_enter(ctx)
+        ctx.submit_fn.assert_called_once_with("my custom cmd")
+
+    def test_empty_text_does_nothing(self):
+        ctx = _make_ctx(entry_text="")
+        _handle_ctrl_enter(ctx)
+        ctx.submit_fn.assert_not_called()
+
+    def test_whitespace_only_does_nothing(self):
+        ctx = _make_ctx(entry_text="   ")
+        _handle_ctrl_enter(ctx)
+        ctx.submit_fn.assert_not_called()
+
+
+class TestHandleEnter:
+    def test_selected_row_takes_priority(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items, entry_text="typed stuff")
+        row = MagicMock()
+        row.get_index.return_value = 1
+        ctx.listbox.get_selected_row.return_value = row
+        result = _handle_enter(ctx)
+        assert result is True
+        ctx.submit_fn.assert_called_once_with("Command 1")
+
+    def test_first_visible_when_no_selection(self):
+        items = _make_items(3)
+        ctx = _make_ctx(visible_commands=items, entry_text="imp")
         ctx.listbox.get_selected_row.return_value = None
         _handle_enter(ctx)
         ctx.submit_fn.assert_called_once_with("Command 0")
+
+    def test_entry_text_when_no_commands(self):
+        ctx = _make_ctx(entry_text="custom command")
+        ctx.listbox.get_selected_row.return_value = None
+        result = _handle_enter(ctx)
+        assert result is True
+        ctx.submit_fn.assert_called_once_with("custom command")
 
     def test_no_items_no_text(self):
         ctx = _make_ctx()

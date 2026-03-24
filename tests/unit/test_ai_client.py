@@ -17,7 +17,7 @@ from ai_clip.ai_client import (
 
 class TestBuildClient:
     def test_creates_client_with_key(self):
-        with patch("ai_clip.ai_client.OpenAI") as mock_cls:
+        with patch("openai.OpenAI") as mock_cls:
             _build_client("sk-test")
             mock_cls.assert_called_once_with(
                 base_url=OPENROUTER_BASE_URL,
