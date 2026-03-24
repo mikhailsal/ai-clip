@@ -1,0 +1,21 @@
+[api]
+openrouter_api_key = "sk-or-your-key-here"
+default_model = "google/gemini-2.0-flash-001"
+timeout_seconds = 30
+
+# Pinned commands always appear at the top of the picker, in this order.
+# Optional: dedicated_hotkey for no-popup execution, model override.
+
+[[commands.pinned]]
+label = "Translate to English"
+prompt = "Translate the following text to English. Return only the translated text."
+dedicated_hotkey = "<Super><Shift>e"
+model = "google/gemini-2.0-flash-001"
+
+[[commands.pinned]]
+label = "Fix punctuation & grammar"
+prompt = "Fix punctuation and grammar in the following text. Return only the corrected text."
+
+[[commands.pinned]]
+label = "Improve style"
+prompt = "Improve the writing style of the following text. Make it more professional and clear. Return only the improved text."

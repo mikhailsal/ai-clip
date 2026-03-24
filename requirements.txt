@@ -1,0 +1,8 @@
+openai
+python-dotenv
+tomli
+tomli-w
+pytest
+pytest-cov
+pytest-mock
+ruff

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "ai-clip"
+version = "0.1.0"
+description = "AI-powered clipboard text transformer for Linux"
+requires-python = ">=3.10"
+dependencies = [
+    "openai",
+    "python-dotenv",
+    "tomli",
+    "tomli-w",
+]
+
+[project.scripts]
+ai-clip = "ai_clip.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "TCH", "PLR"]
+
+[tool.ruff.lint.pylint]
+max-statements = 30
+max-branches = 10
+max-args = 6
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/ai_clip --cov-report=term-missing --cov-fail-under=95"
