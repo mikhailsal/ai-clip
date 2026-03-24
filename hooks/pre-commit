@@ -1,5 +1,15 @@
 #!/bin/bash
 
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+VENV_PYTHON="$REPO_ROOT/.venv/bin/python"
+VENV_RUFF="$REPO_ROOT/.venv/bin/ruff"
+
+if [ ! -x "$VENV_PYTHON" ]; then
+    echo "ERROR: virtualenv not found at $REPO_ROOT/.venv"
+    echo "Run: python -m venv .venv && pip install -e '.[dev]'"
+    exit 1
+fi
+
 FAILED=0
 
 echo "=== Pre-commit checks ==="
@@ -7,7 +17,7 @@ echo "=== Pre-commit checks ==="
 # 1. Ruff lint check
 echo ""
 echo "[1/3] Running ruff linter..."
-ruff check src/ tests/
+"$VENV_RUFF" check src/ tests/
 if [ $? -ne 0 ]; then
     echo "FAIL: Ruff lint check failed."
     echo "Run 'make format' to auto-fix, then review."
@@ -36,7 +46,7 @@ fi
 # 3. Tests with coverage
 echo ""
 echo "[3/3] Running tests with coverage check (>= 95%)..."
-python -m pytest --tb=short -q
+"$VENV_PYTHON" -m pytest --tb=short -q
 if [ $? -ne 0 ]; then
     echo "FAIL: Tests or coverage threshold failed."
     FAILED=1
