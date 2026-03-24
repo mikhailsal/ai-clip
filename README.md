@@ -25,7 +25,7 @@ AI-powered clipboard text transformer for Linux. Select text in any application,
 sudo apt install xclip xdotool python3-gi gir1.2-gtk-4.0
 
 # Clone and set up
-git clone https://github.com/your-username/ai-clip.git
+git clone https://github.com/mikhailsal/ai-clip.git
 cd ai-clip
 python -m venv .venv
 source .venv/bin/activate
