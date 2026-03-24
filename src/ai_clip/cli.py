@@ -1,0 +1,114 @@
+"""Command-line interface for ai-clip."""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+import typing
+
+if typing.TYPE_CHECKING:
+    from pathlib import Path
+
+from ai_clip.config import load_config
+from ai_clip.history import build_command_list, load_history
+from ai_clip.orchestrator import run_direct_command, run_with_picker
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="ai-clip",
+        description="AI-powered clipboard text transformer for Linux",
+    )
+    parser.add_argument(
+        "--command",
+        type=str,
+        default=None,
+        help="Execute a specific command directly without showing the picker",
+    )
+    parser.add_argument(
+        "--list-commands",
+        action="store_true",
+        help="List all configured commands (pinned + history)",
+    )
+    parser.add_argument(
+        "--setup-hotkeys",
+        action="store_true",
+        help="Register Cinnamon hotkeys from config",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to config file (default: ~/.config/ai-clip/config.toml)",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable verbose logging",
+    )
+    return parser
+
+
+def _setup_logging(verbose: bool) -> None:
+    """Configure logging based on verbosity."""
+    level = logging.DEBUG if verbose else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
+def _list_commands(config_path: Path | None) -> None:
+    """Print all configured commands."""
+    config = load_config(config_path)
+    history = load_history()
+    commands = build_command_list(config.pinned_commands, history)
+
+    if not commands:
+        print("No commands configured. Edit your config.toml to add pinned commands.")
+        return
+
+    for i, cmd in enumerate(commands):
+        pin = " [pinned]" if cmd.is_pinned else ""
+        count = f" (used {cmd.count}x)" if cmd.count > 0 else ""
+        print(f"  {i + 1}. {cmd.label}{pin}{count}")
+
+
+def _setup_hotkeys(config_path: Path | None) -> None:
+    """Register Cinnamon hotkeys from config."""
+    from ai_clip.hotkeys import register_hotkeys
+
+    config = load_config(config_path)
+    register_hotkeys(config)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main entry point."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    _setup_logging(args.verbose)
+
+    config_path = args.config
+
+    if args.list_commands:
+        _list_commands(config_path)
+        return 0
+
+    if args.setup_hotkeys:
+        _setup_hotkeys(config_path)
+        return 0
+
+    if args.command:
+        success = run_direct_command(args.command, config_path)
+    else:
+        success = run_with_picker(config_path)
+
+    return 0 if success else 1
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())
