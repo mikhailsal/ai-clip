@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from ai_clip.cli import _list_commands, _setup_logging, build_parser, main
+from ai_clip.cli import LOG_DIR, LOG_FILE, _list_commands, _setup_logging, build_parser, main
 from ai_clip.history import CommandItem
 
 
@@ -48,7 +48,7 @@ class TestBuildParser:
 
 
 class TestSetupLogging:
-    def test_verbose(self):
+    def test_verbose_has_debug_console(self):
         import logging
 
         root = logging.getLogger()
@@ -56,15 +56,39 @@ class TestSetupLogging:
         root.setLevel(logging.NOTSET)
         _setup_logging(True)
         assert root.level == logging.DEBUG
+        console_handlers = [h for h in root.handlers if isinstance(h, logging.StreamHandler)
+                            and not hasattr(h, "baseFilename")]
+        assert any(h.level == logging.DEBUG for h in console_handlers)
+        root.handlers.clear()
 
-    def test_quiet(self):
+    def test_quiet_has_warning_console(self):
         import logging
 
         root = logging.getLogger()
         root.handlers.clear()
         root.setLevel(logging.NOTSET)
         _setup_logging(False)
-        assert root.level == logging.WARNING
+        assert root.level == logging.DEBUG
+        console_handlers = [h for h in root.handlers if isinstance(h, logging.StreamHandler)
+                            and not hasattr(h, "baseFilename")]
+        assert any(h.level == logging.WARNING for h in console_handlers)
+        root.handlers.clear()
+
+    def test_creates_file_handler(self):
+        import logging
+
+        root = logging.getLogger()
+        root.handlers.clear()
+        root.setLevel(logging.NOTSET)
+        _setup_logging(False)
+        file_handlers = [h for h in root.handlers if hasattr(h, "baseFilename")]
+        assert len(file_handlers) == 1
+        assert file_handlers[0].level == logging.DEBUG
+        root.handlers.clear()
+
+    def test_log_dir_constant(self):
+        assert LOG_DIR.name == "log"
+        assert LOG_FILE.name == "ai-clip.log"
 
 
 class TestListCommands:

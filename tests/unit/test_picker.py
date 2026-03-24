@@ -129,10 +129,15 @@ class TestPickerResult:
         r = PickerResult(command="test")
         assert r.command == "test"
         assert r.cancelled is False
+        assert r.trigger == ""
 
     def test_cancelled(self):
         r = PickerResult(command="", cancelled=True)
         assert r.cancelled is True
+
+    def test_with_trigger(self):
+        r = PickerResult(command="Fix", trigger="ctrl_1")
+        assert r.trigger == "ctrl_1"
 
 
 class TestPickCommandHeadless:
@@ -172,7 +177,7 @@ class TestHandleKeypress:
         ctx = _make_ctx(visible_commands=items)
         result = _handle_keypress(ctx.gdk.KEY_1, 0x4, ctx)
         assert result is True
-        ctx.submit_fn.assert_called_once_with("Command 0")
+        ctx.submit_fn.assert_called_once_with("Command 0", "ctrl_1")
 
     def test_ctrl_number_out_of_range(self):
         items = _make_items(1)
@@ -185,7 +190,7 @@ class TestHandleKeypress:
         ctx.listbox.get_selected_row.return_value = None
         result = _handle_keypress(ctx.gdk.KEY_Return, 0, ctx)
         assert result is True
-        ctx.submit_fn.assert_called_once_with("custom command")
+        ctx.submit_fn.assert_called_once_with("custom command", "enter_custom")
 
     def test_down_arrow_navigates(self):
         items = _make_items(3)
@@ -212,14 +217,14 @@ class TestHandleKeypress:
         ctx = _make_ctx(entry_text="test")
         ctx.listbox.get_selected_row.return_value = None
         _handle_keypress(ctx.gdk.KEY_KP_Enter, 0, ctx)
-        ctx.submit_fn.assert_called_once_with("test")
+        ctx.submit_fn.assert_called_once_with("test", "enter_custom")
 
     def test_ctrl_enter_sends_raw_text(self):
         items = _make_items(3)
         ctx = _make_ctx(visible_commands=items, entry_text="correct")
         result = _handle_keypress(ctx.gdk.KEY_Return, 0x4, ctx)
         assert result is True
-        ctx.submit_fn.assert_called_once_with("correct")
+        ctx.submit_fn.assert_called_once_with("correct", "ctrl_enter")
 
 
 class TestNavigateList:
@@ -286,7 +291,7 @@ class TestHandleCtrlKey:
         ctx = _make_ctx(visible_commands=items)
         result = _handle_ctrl_key(ctx.gdk.KEY_1, ctx)
         assert result is True
-        ctx.submit_fn.assert_called_once_with("Command 0")
+        ctx.submit_fn.assert_called_once_with("Command 0", "ctrl_1")
 
     def test_ctrl_number_out_of_range(self):
         items = _make_items(1)
@@ -298,7 +303,7 @@ class TestHandleCtrlKey:
         ctx = _make_ctx(entry_text="raw text")
         result = _handle_ctrl_key(ctx.gdk.KEY_Return, ctx)
         assert result is True
-        ctx.submit_fn.assert_called_once_with("raw text")
+        ctx.submit_fn.assert_called_once_with("raw text", "ctrl_enter")
 
     def test_unhandled_ctrl_key(self):
         ctx = _make_ctx()
@@ -312,7 +317,7 @@ class TestHandleCtrlEnter:
         ctx = _make_ctx(visible_commands=items, entry_text="correct")
         result = _handle_ctrl_enter(ctx)
         assert result is True
-        ctx.submit_fn.assert_called_once_with("correct")
+        ctx.submit_fn.assert_called_once_with("correct", "ctrl_enter")
 
     def test_ignores_list_selection(self):
         items = _make_items(3)
@@ -321,7 +326,7 @@ class TestHandleCtrlEnter:
         row.get_index.return_value = 1
         ctx.listbox.get_selected_row.return_value = row
         _handle_ctrl_enter(ctx)
-        ctx.submit_fn.assert_called_once_with("my custom cmd")
+        ctx.submit_fn.assert_called_once_with("my custom cmd", "ctrl_enter")
 
     def test_empty_text_does_nothing(self):
         ctx = _make_ctx(entry_text="")
@@ -343,21 +348,21 @@ class TestHandleEnter:
         ctx.listbox.get_selected_row.return_value = row
         result = _handle_enter(ctx)
         assert result is True
-        ctx.submit_fn.assert_called_once_with("Command 1")
+        ctx.submit_fn.assert_called_once_with("Command 1", "enter_selected")
 
     def test_first_visible_when_no_selection(self):
         items = _make_items(3)
         ctx = _make_ctx(visible_commands=items, entry_text="imp")
         ctx.listbox.get_selected_row.return_value = None
         _handle_enter(ctx)
-        ctx.submit_fn.assert_called_once_with("Command 0")
+        ctx.submit_fn.assert_called_once_with("Command 0", "enter_first")
 
     def test_entry_text_when_no_commands(self):
         ctx = _make_ctx(entry_text="custom command")
         ctx.listbox.get_selected_row.return_value = None
         result = _handle_enter(ctx)
         assert result is True
-        ctx.submit_fn.assert_called_once_with("custom command")
+        ctx.submit_fn.assert_called_once_with("custom command", "enter_custom")
 
     def test_no_items_no_text(self):
         ctx = _make_ctx()

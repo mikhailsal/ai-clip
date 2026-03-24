@@ -6,6 +6,7 @@ Coordinates: clipboard capture -> command selection -> AI transformation -> past
 from __future__ import annotations
 
 import logging
+import time
 import typing
 
 if typing.TYPE_CHECKING:
@@ -26,22 +27,36 @@ from ai_clip.picker import PickerResult, show_picker
 
 logger = logging.getLogger(__name__)
 
+_TRUNCATE_LEN = 200
 
-def _capture_selected_text() -> str:
+
+def _truncate(text: str) -> str:
+    """Truncate text for log display, appending '...' if shortened."""
+    if len(text) <= _TRUNCATE_LEN:
+        return repr(text)
+    return repr(text[:_TRUNCATE_LEN]) + f"... ({len(text)} chars total)"
+
+
+def _capture_selected_text() -> tuple[str, str]:
     """Capture the currently selected text, trying primary selection first.
 
     The X11 primary selection contains highlighted text without needing Ctrl+C.
     Falls back to Ctrl+C if primary selection is empty.
+
+    Returns (text, capture_method) where capture_method is 'primary_selection' or 'ctrl_c'.
     """
     try:
         primary = read_primary_selection()
         if primary.strip():
-            return primary
+            logger.debug("Captured text via primary selection (highlighted text)")
+            return primary, "primary_selection"
     except ClipboardError:
-        pass
+        logger.debug("Primary selection unavailable, falling back to Ctrl+C")
 
     simulate_copy()
-    return read_clipboard()
+    text = read_clipboard()
+    logger.debug("Captured text via Ctrl+C (clipboard)")
+    return text, "ctrl_c"
 
 
 def _find_prompt_for_command(label: str, config: AppConfig) -> tuple[str, str | None]:
@@ -66,14 +81,30 @@ def _do_transform(
     prompt, model_override = _find_prompt_for_command(command_label, config)
     model = model_override or config.default_model
 
-    logger.info("Transforming with command=%r, model=%s", command_label, model)
-    return transform_text(
+    logger.info(
+        "AI request: command=%r, model=%s, prompt=%r, input=%s",
+        command_label,
+        model,
+        prompt,
+        _truncate(text),
+    )
+
+    t0 = time.monotonic()
+    result = transform_text(
         text=text,
         command_prompt=prompt,
         api_key=config.openrouter_api_key,
         model=model,
         timeout=config.timeout_seconds,
     )
+    elapsed_ms = (time.monotonic() - t0) * 1000
+
+    logger.info(
+        "AI response: elapsed=%.0fms, output=%s",
+        elapsed_ms,
+        _truncate(result),
+    )
+    return result
 
 
 def run_with_picker(config_path: Path | None = None) -> bool:
@@ -81,12 +112,13 @@ def run_with_picker(config_path: Path | None = None) -> bool:
 
     Returns True on success, False on cancellation or error.
     """
+    logger.info("=== run_with_picker: starting picker flow ===")
     config = load_config(config_path)
     history = load_history()
     commands = build_command_list(config.pinned_commands, history)
 
     try:
-        original_text = _capture_selected_text()
+        original_text, capture_method = _capture_selected_text()
     except ClipboardError as exc:
         logger.error("Failed to read clipboard: %s", exc)
         return False
@@ -95,12 +127,27 @@ def run_with_picker(config_path: Path | None = None) -> bool:
         logger.warning("Clipboard is empty, nothing to transform")
         return False
 
+    logger.debug(
+        "Captured text: method=%s, length=%d, text=%s",
+        capture_method,
+        len(original_text),
+        _truncate(original_text),
+    )
+
     picker_result: PickerResult = show_picker(commands)
     if picker_result.cancelled or not picker_result.command:
-        logger.info("User cancelled")
+        logger.info("User cancelled the picker")
         return False
 
-    return _execute_transform(original_text, picker_result.command, config, history)
+    logger.info(
+        "Picker result: command=%r, trigger=%s",
+        picker_result.command,
+        picker_result.trigger or "unknown",
+    )
+
+    return _execute_transform(
+        original_text, picker_result.command, config, history, picker_result.trigger
+    )
 
 
 def run_direct_command(command_label: str, config_path: Path | None = None) -> bool:
@@ -108,11 +155,12 @@ def run_direct_command(command_label: str, config_path: Path | None = None) -> b
 
     Returns True on success, False on error.
     """
+    logger.info("=== run_direct_command: command=%r (dedicated hotkey) ===", command_label)
     config = load_config(config_path)
     history = load_history()
 
     try:
-        original_text = _capture_selected_text()
+        original_text, capture_method = _capture_selected_text()
     except ClipboardError as exc:
         logger.error("Failed to read clipboard: %s", exc)
         return False
@@ -121,7 +169,14 @@ def run_direct_command(command_label: str, config_path: Path | None = None) -> b
         logger.warning("Clipboard is empty, nothing to transform")
         return False
 
-    return _execute_transform(original_text, command_label, config, history)
+    logger.debug(
+        "Captured text: method=%s, length=%d, text=%s",
+        capture_method,
+        len(original_text),
+        _truncate(original_text),
+    )
+
+    return _execute_transform(original_text, command_label, config, history, "direct_hotkey")
 
 
 def _execute_transform(
@@ -129,8 +184,11 @@ def _execute_transform(
     command_label: str,
     config: AppConfig,
     history,
+    trigger: str = "",
 ) -> bool:
     """Transform text and paste the result. Updates history on success."""
+    logger.debug("Execute transform: command=%r, trigger=%s", command_label, trigger or "unknown")
+
     try:
         result = _do_transform(text, command_label, config)
     except AIClientError as exc:
@@ -146,5 +204,5 @@ def _execute_transform(
 
     history.record_usage(command_label)
     history.save()
-    logger.info("Transformation complete, pasted result")
+    logger.info("Transformation complete: command=%r, pasted result", command_label)
     return True

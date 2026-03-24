@@ -27,6 +27,7 @@ class PickerResult:
 
     command: str
     cancelled: bool = False
+    trigger: str = ""
 
 
 def filter_commands(commands: list[CommandItem], query: str) -> list[CommandItem]:
@@ -154,7 +155,7 @@ def _handle_ctrl_key(keyval, ctx: _KeyContext) -> bool:
     if ctx.gdk.KEY_1 <= keyval <= ctx.gdk.KEY_9:
         idx = keyval - ctx.gdk.KEY_1
         if idx < len(ctx.visible_commands):
-            ctx.submit_fn(ctx.visible_commands[idx].label)
+            ctx.submit_fn(ctx.visible_commands[idx].label, f"ctrl_{idx + 1}")
         return True
 
     if keyval in (ctx.gdk.KEY_Return, ctx.gdk.KEY_KP_Enter):
@@ -167,7 +168,7 @@ def _handle_ctrl_enter(ctx: _KeyContext) -> bool:
     """Handle Ctrl+Enter: always submit the raw entry text as a custom command."""
     text = ctx.entry.get_text().strip()
     if text:
-        ctx.submit_fn(text)
+        ctx.submit_fn(text, "ctrl_enter")
     return True
 
 
@@ -198,16 +199,16 @@ def _handle_enter(ctx: _KeyContext) -> bool:
     if row is not None:
         idx = row.get_index()
         if idx < len(ctx.visible_commands):
-            ctx.submit_fn(ctx.visible_commands[idx].label)
+            ctx.submit_fn(ctx.visible_commands[idx].label, "enter_selected")
             return True
 
     if ctx.visible_commands:
-        ctx.submit_fn(ctx.visible_commands[0].label)
+        ctx.submit_fn(ctx.visible_commands[0].label, "enter_first")
         return True
 
     text = ctx.entry.get_text().strip()
     if text:
-        ctx.submit_fn(text)
+        ctx.submit_fn(text, "enter_custom")
     return True
 
 
@@ -230,8 +231,8 @@ def _connect_picker_events(gtk, gdk, window, widgets, commands, state):  # pragm
     entry, listbox = widgets["entry"], widgets["listbox"]
     visible_ref = state["visible_ref"]
 
-    def submit_fn(command: str):
-        state["result"] = PickerResult(command=command)
+    def submit_fn(command: str, trigger: str = ""):
+        state["result"] = PickerResult(command=command, trigger=trigger)
         window.close()
 
     def cancel_fn():

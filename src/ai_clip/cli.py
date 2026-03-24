@@ -10,9 +10,12 @@ import typing
 if typing.TYPE_CHECKING:
     from pathlib import Path
 
-from ai_clip.config import load_config
+from ai_clip.config import PROJECT_DIR, load_config
 from ai_clip.history import build_command_list, load_history
 from ai_clip.orchestrator import run_direct_command, run_with_picker
+
+LOG_DIR = PROJECT_DIR / "log"
+LOG_FILE = LOG_DIR / "ai-clip.log"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,13 +56,32 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _setup_logging(verbose: bool) -> None:
-    """Configure logging based on verbosity."""
-    level = logging.DEBUG if verbose else logging.WARNING
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
+    """Configure logging: always write DEBUG to log file, console level depends on verbosity."""
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+
+    console_level = logging.DEBUG if verbose else logging.WARNING
+    console = logging.StreamHandler()
+    console.setLevel(console_level)
+    console.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
     )
+    root.addHandler(console)
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    from logging.handlers import RotatingFileHandler
+
+    file_handler = RotatingFileHandler(
+        LOG_FILE, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    root.addHandler(file_handler)
 
 
 def _list_commands(config_path: Path | None) -> None:
