@@ -32,9 +32,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Copy and edit config
-mkdir -p ~/.config/ai-clip
-cp config.example.toml ~/.config/ai-clip/config.toml
-# Edit ~/.config/ai-clip/config.toml with your OpenRouter API key
+cp config.example.toml config.toml
+# Edit config.toml with your OpenRouter API key
 
 # Install git hooks
 make setup-hooks
@@ -83,9 +82,9 @@ python -m ai_clip --setup-hotkeys
 
 ## Configuration
 
-Config file: `~/.config/ai-clip/config.toml`
+Config file: `config.toml` in the project directory (gitignored, won't be committed).
 
-See `config.example.toml` for all options.
+Copy from `config.example.toml` and edit with your API key. History is stored in `history.json` (also gitignored).
 
 ## Development
 

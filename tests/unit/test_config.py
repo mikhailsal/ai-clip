@@ -135,9 +135,11 @@ class TestLoadConfig:
         assert cfg.config_path == config_path
 
     def test_none_path_uses_default(self):
+        from ai_clip.config import DEFAULT_CONFIG_PATH
+
         with patch("ai_clip.config._load_from_toml", return_value={}):
             cfg = load_config(None)
-        assert cfg.config_path == Path.home() / ".config" / "ai-clip" / "config.toml"
+        assert cfg.config_path == DEFAULT_CONFIG_PATH
 
 
 class TestGenerateDefaultConfig:

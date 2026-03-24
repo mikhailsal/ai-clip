@@ -1,6 +1,6 @@
 """Command history management for ai-clip.
 
-Stores usage history in ~/.config/ai-clip/history.json, sorted by
+Stores usage history in history.json in the project directory, sorted by
 frequency (count) and recency (last_used). Merges with pinned commands
 from config to produce the final command list for the picker.
 """
@@ -13,11 +13,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ai_clip.config import DEFAULT_CONFIG_DIR, PinnedCommand
+from ai_clip.config import DEFAULT_HISTORY_PATH, PinnedCommand
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_HISTORY_PATH = DEFAULT_CONFIG_DIR / "history.json"
 MAX_HISTORY_ENTRIES = 50
 
 

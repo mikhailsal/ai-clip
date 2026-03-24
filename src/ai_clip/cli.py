@@ -41,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--config",
         type=str,
         default=None,
-        help="Path to config file (default: ~/.config/ai-clip/config.toml)",
+        help="Path to config file (default: config.toml in project directory)",
     )
     parser.add_argument(
         "--verbose",

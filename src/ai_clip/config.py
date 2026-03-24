@@ -1,6 +1,6 @@
 """Configuration management for ai-clip.
 
-Loads from ~/.config/ai-clip/config.toml with environment variable fallbacks.
+Loads from config.toml in the project directory with environment variable fallbacks.
 """
 
 from __future__ import annotations
@@ -15,8 +15,23 @@ import tomli_w
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_DIR = Path.home() / ".config" / "ai-clip"
-DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.toml"
+
+def _find_project_dir() -> Path:
+    """Find the project root by walking up from this file until pyproject.toml is found."""
+    current = Path(__file__).resolve().parent
+    for _ in range(10):
+        if (current / "pyproject.toml").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return Path.cwd()
+
+
+PROJECT_DIR = _find_project_dir()
+DEFAULT_CONFIG_PATH = PROJECT_DIR / "config.toml"
+DEFAULT_HISTORY_PATH = PROJECT_DIR / "history.json"
 DEFAULT_MODEL = "google/gemini-2.0-flash-001"
 DEFAULT_TIMEOUT = 30
 DEFAULT_MAIN_HOTKEY = "<Super><Shift>a"
