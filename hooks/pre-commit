@@ -1,0 +1,54 @@
+#!/bin/bash
+
+FAILED=0
+
+echo "=== Pre-commit checks ==="
+
+# 1. Ruff lint check
+echo ""
+echo "[1/3] Running ruff linter..."
+ruff check src/ tests/
+if [ $? -ne 0 ]; then
+    echo "FAIL: Ruff lint check failed."
+    echo "Run 'make format' to auto-fix, then review."
+    FAILED=1
+else
+    echo "PASS: Ruff lint check."
+fi
+
+# 2. File length check (max 500 lines)
+echo ""
+echo "[2/3] Checking file lengths (max 500 lines)..."
+LONG_FILES=""
+for f in $(find src/ tests/ -name '*.py' -type f); do
+    lines=$(wc -l < "$f")
+    if [ "$lines" -gt 500 ]; then
+        LONG_FILES="$LONG_FILES\n  $f ($lines lines)"
+    fi
+done
+if [ -n "$LONG_FILES" ]; then
+    echo "FAIL: Files exceeding 500 lines:$LONG_FILES"
+    FAILED=1
+else
+    echo "PASS: All files within 500 line limit."
+fi
+
+# 3. Tests with coverage
+echo ""
+echo "[3/3] Running tests with coverage check (>= 95%)..."
+python -m pytest --tb=short -q
+if [ $? -ne 0 ]; then
+    echo "FAIL: Tests or coverage threshold failed."
+    FAILED=1
+else
+    echo "PASS: Tests and coverage."
+fi
+
+echo ""
+if [ $FAILED -ne 0 ]; then
+    echo "=== Pre-commit FAILED. Commit aborted. ==="
+    exit 1
+fi
+
+echo "=== Pre-commit PASSED ==="
+exit 0
