@@ -130,8 +130,7 @@ def generate_default_config(config_path: Path | None = None) -> Path:
                 {
                     "label": "Translate to English",
                     "prompt": (
-                        "Translate the following text to English. "
-                        "Return only the translated text."
+                        "Translate the following text to English. Return only the translated text."
                     ),
                     "dedicated_hotkey": "<Super><Shift>e",
                 },
