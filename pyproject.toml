@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-clip"
@@ -33,6 +33,10 @@ max-statements = 30
 max-branches = 10
 max-args = 6
 
+[tool.coverage.run]
+source = ["ai_clip"]
+omit = ["src/ai_clip/__main__.py"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src/ai_clip --cov-report=term-missing --cov-fail-under=95"
+addopts = "--cov --cov-report=term-missing --cov-fail-under=95"
