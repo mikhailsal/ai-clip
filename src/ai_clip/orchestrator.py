@@ -32,6 +32,35 @@ logger = logging.getLogger(__name__)
 _TRUNCATE_LEN = 200
 
 
+class _PerfTimer:
+    """Lightweight timer for tracking phase-by-phase latency in a pipeline."""
+
+    __slots__ = ("_t0", "_last", "_name")
+
+    def __init__(self, name: str):
+        self._name = name
+        self._t0 = time.monotonic()
+        self._last = self._t0
+
+    def phase(self, label: str) -> float:
+        """Log time since last phase and since start. Returns phase duration in ms."""
+        now = time.monotonic()
+        phase_ms = (now - self._last) * 1000
+        total_ms = (now - self._t0) * 1000
+        logger.info(
+            "[PERF %s] %s: %.0fms (total %.0fms)",
+            self._name,
+            label,
+            phase_ms,
+            total_ms,
+        )
+        self._last = now
+        return phase_ms
+
+    def total_ms(self) -> float:
+        return (time.monotonic() - self._t0) * 1000
+
+
 def _truncate(text: str) -> str:
     """Truncate text for log display, appending '...' if shortened."""
     if len(text) <= _TRUNCATE_LEN:
@@ -42,9 +71,11 @@ def _truncate(text: str) -> str:
 def _capture_selected_text(source_window: str | None = None) -> tuple[str, str]:
     """Capture the currently selected text using Ctrl+C.
 
-    Uses a robust approach: saves old clipboard, simulates Ctrl+C targeting
-    the source window, then reads back. Retries if clipboard didn't change,
-    because some apps (Chrome) need more time.
+    Saves old clipboard, simulates Ctrl+C targeting the source window,
+    then reads back. If the clipboard changed, returns immediately.
+    If unchanged but non-empty, trusts the first attempt after a single
+    short retry (the text might genuinely be the same as what was on the
+    clipboard). Only does full retries when clipboard is truly empty.
 
     Args:
         source_window: X11 window ID captured at program start, before focus shifts.
@@ -53,22 +84,25 @@ def _capture_selected_text(source_window: str | None = None) -> tuple[str, str]:
     """
     old_clipboard = _safe_read_clipboard()
 
-    for attempt in range(COPY_RETRIES):
+    simulate_copy(source_window)
+    text = read_clipboard()
+
+    if text.strip() and text != old_clipboard:
+        logger.debug("Captured text via Ctrl+C (clipboard changed)")
+        return text, "ctrl_c"
+
+    if text.strip():
+        logger.debug("Clipboard unchanged after Ctrl+C, but has content — accepting it")
+        return text, "ctrl_c_unchanged"
+
+    for attempt in range(1, COPY_RETRIES):
+        logger.debug("Clipboard empty after Ctrl+C, retrying (attempt %d)", attempt + 1)
+        time.sleep(COPY_RETRY_DELAY)
         simulate_copy(source_window)
         text = read_clipboard()
-
-        if text.strip() and text != old_clipboard:
-            logger.debug("Captured text via Ctrl+C (attempt %d)", attempt + 1)
+        if text.strip():
+            logger.debug("Captured text via Ctrl+C retry (attempt %d)", attempt + 1)
             return text, "ctrl_c"
-
-        if attempt < COPY_RETRIES - 1:
-            logger.debug("Clipboard unchanged after Ctrl+C, retrying (attempt %d)", attempt + 1)
-            time.sleep(COPY_RETRY_DELAY)
-
-    text = read_clipboard()
-    if text.strip():
-        logger.debug("Using clipboard content after retries (may be stale)")
-        return text, "ctrl_c_fallback"
 
     return "", "ctrl_c_empty"
 
@@ -134,16 +168,19 @@ def run_with_picker(config_path: Path | None = None, source_window: str | None =
 
     Returns True on success, False on cancellation or error.
     """
+    perf = _PerfTimer("picker")
     logger.info("=== run_with_picker: starting picker flow ===")
     config = load_config(config_path)
     history = load_history()
     commands = build_command_list(config.pinned_commands, history)
+    perf.phase("config+history")
 
     try:
         original_text, capture_method = _capture_selected_text(source_window)
     except ClipboardError as exc:
         logger.error("Failed to read clipboard: %s", exc)
         return False
+    perf.phase("capture_text")
 
     if not original_text.strip():
         logger.warning("Clipboard is empty, nothing to transform")
@@ -160,6 +197,7 @@ def run_with_picker(config_path: Path | None = None, source_window: str | None =
     if picker_result.cancelled or not picker_result.command:
         logger.info("User cancelled the picker")
         return False
+    perf.phase("picker_ui")
 
     logger.info(
         "Picker result: command=%r, trigger=%s",
@@ -167,13 +205,14 @@ def run_with_picker(config_path: Path | None = None, source_window: str | None =
         picker_result.trigger or "unknown",
     )
 
+    logger.debug("Execute transform: trigger=%s", picker_result.trigger or "unknown")
     return _execute_transform(
         original_text,
         picker_result.command,
         config,
         history,
-        picker_result.trigger,
         source_window=source_window,
+        perf=perf,
     )
 
 
@@ -184,15 +223,18 @@ def run_direct_command(
 
     Returns True on success, False on error.
     """
+    perf = _PerfTimer("direct")
     logger.info("=== run_direct_command: command=%r (dedicated hotkey) ===", command_label)
     config = load_config(config_path)
     history = load_history()
+    perf.phase("config+history")
 
     try:
         original_text, capture_method = _capture_selected_text(source_window)
     except ClipboardError as exc:
         logger.error("Failed to read clipboard: %s", exc)
         return False
+    perf.phase("capture_text")
 
     if not original_text.strip():
         logger.warning("Clipboard is empty, nothing to transform")
@@ -205,8 +247,14 @@ def run_direct_command(
         _truncate(original_text),
     )
 
+    logger.debug("Execute transform: trigger=direct_hotkey")
     return _execute_transform(
-        original_text, command_label, config, history, "direct_hotkey", source_window=source_window
+        original_text,
+        command_label,
+        config,
+        history,
+        source_window=source_window,
+        perf=perf,
     )
 
 
@@ -215,11 +263,10 @@ def _execute_transform(
     command_label: str,
     config: AppConfig,
     history,
-    trigger: str = "",
     source_window: str | None = None,
+    perf: _PerfTimer | None = None,
 ) -> bool:
     """Transform text and paste the result. Updates history on success."""
-    logger.debug("Execute transform: command=%r, trigger=%s", command_label, trigger or "unknown")
 
     if config.sound_enabled:
         play_sound(config.sound_acknowledge)
@@ -229,15 +276,31 @@ def _execute_transform(
     except AIClientError as exc:
         logger.error("AI transformation failed: %s", exc)
         return False
+    if perf:
+        perf.phase("ai_transform")
 
     try:
         write_clipboard(result)
+        if perf:
+            perf.phase("write_clipboard")
         simulate_paste(source_window)
+        if perf:
+            perf.phase("simulate_paste")
     except ClipboardError as exc:
         logger.error("Failed to paste result: %s", exc)
         return False
 
     history.record_usage(command_label)
     history.save()
-    logger.info("Transformation complete: command=%r, pasted result", command_label)
+    if perf:
+        perf.phase("history_save")
+        epoch_end = int(time.time() * 1000)
+        logger.info(
+            "Transformation complete: command=%r, total=%.0fms, epoch_end_ms=%d",
+            command_label,
+            perf.total_ms(),
+            epoch_end,
+        )
+    else:
+        logger.info("Transformation complete: command=%r, pasted result", command_label)
     return True

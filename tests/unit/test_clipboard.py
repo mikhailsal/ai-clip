@@ -208,7 +208,7 @@ class TestSimulateCopy:
         ):
             simulate_copy()
             mock_focus.assert_not_called()
-            mock_run.assert_called_once_with(["xdotool", "key", "--delay", "50", "ctrl+c"])
+            mock_run.assert_called_once_with(["xdotool", "key", "--delay", "30", "ctrl+c"])
 
     def test_x11_with_window_id(self):
         with (
@@ -219,7 +219,7 @@ class TestSimulateCopy:
         ):
             simulate_copy(window_id="12345")
             mock_focus.assert_called_once_with("12345")
-            mock_run.assert_called_once_with(["xdotool", "key", "--delay", "50", "ctrl+c"])
+            mock_run.assert_called_once_with(["xdotool", "key", "--delay", "30", "ctrl+c"])
 
     def test_wayland(self):
         with (
@@ -239,38 +239,33 @@ class TestSimulateCopy:
         ):
             simulate_copy()
             assert mock_sleep.call_count == 2
-            mock_sleep.assert_any_call(0.05)
-            mock_sleep.assert_any_call(0.3)
+            mock_sleep.assert_any_call(0.03)
+            mock_sleep.assert_any_call(0.15)
 
 
 class TestSimulatePaste:
     def test_x11_no_window(self):
         with (
             patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
-            patch("ai_clip.clipboard._focus_window") as mock_focus,
             patch("ai_clip.clipboard._run") as mock_run,
-            patch("ai_clip.clipboard.time.sleep"),
         ):
             simulate_paste()
-            mock_focus.assert_not_called()
-            mock_run.assert_called_once_with(["xdotool", "key", "--delay", "50", "ctrl+v"])
+            mock_run.assert_called_once_with(["xdotool", "key", "--delay", "30", "ctrl+v"])
 
     def test_x11_with_window_id(self):
         with (
             patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
-            patch("ai_clip.clipboard._focus_window") as mock_focus,
             patch("ai_clip.clipboard._run") as mock_run,
-            patch("ai_clip.clipboard.time.sleep"),
         ):
             simulate_paste(window_id="12345")
-            mock_focus.assert_called_once_with("12345")
-            mock_run.assert_called_once_with(["xdotool", "key", "--delay", "50", "ctrl+v"])
+            assert mock_run.call_count == 2
+            mock_run.assert_any_call(["xdotool", "windowactivate", "--sync", "12345"])
+            mock_run.assert_any_call(["xdotool", "key", "--delay", "30", "ctrl+v"])
 
     def test_wayland(self):
         with (
             patch("ai_clip.clipboard._detect_session_type", return_value="wayland"),
             patch("ai_clip.clipboard._run") as mock_run,
-            patch("ai_clip.clipboard.time.sleep"),
         ):
             simulate_paste()
             mock_run.assert_called_once_with(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"])

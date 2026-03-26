@@ -64,7 +64,10 @@ def _setup_logging(verbose: bool) -> None:
     console = logging.StreamHandler()
     console.setLevel(console_level)
     console.setFormatter(
-        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
+        logging.Formatter(
+            "%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
     )
     root.addHandler(console)
 
@@ -77,7 +80,7 @@ def _setup_logging(verbose: bool) -> None:
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(
         logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            "%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
@@ -108,8 +111,14 @@ def _setup_hotkeys(config_path: Path | None) -> None:
     register_hotkeys(config)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    _process_start: float | None = None,
+    _epoch_start_ms: int | None = None,
+) -> int:
     """Main entry point."""
+    import time
+
     from ai_clip.clipboard import _get_active_window_id
 
     source_window = _get_active_window_id()
@@ -117,6 +126,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     _setup_logging(args.verbose)
+
+    log = logging.getLogger(__name__)
+    if _process_start is not None:
+        startup_ms = (time.monotonic() - _process_start) * 1000
+        log.info("[PERF startup] Python init + imports + arg parse: %.0fms", startup_ms)
+    if _epoch_start_ms is not None:
+        log.info("[PERF startup] epoch_start_ms=%d", _epoch_start_ms)
 
     config_path = args.config
 

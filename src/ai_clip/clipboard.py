@@ -9,11 +9,11 @@ import time
 
 logger = logging.getLogger(__name__)
 
-COPY_PASTE_DELAY = 0.3
-PRE_COPY_DELAY = 0.05
-XDOTOOL_KEY_DELAY = 50
+COPY_PASTE_DELAY = 0.15
+PRE_COPY_DELAY = 0.03
+XDOTOOL_KEY_DELAY = 30
 COPY_RETRIES = 3
-COPY_RETRY_DELAY = 0.15
+COPY_RETRY_DELAY = 0.1
 
 
 class ClipboardError(Exception):
@@ -127,12 +127,17 @@ def simulate_copy(window_id: str | None = None) -> None:
 
 
 def simulate_paste(window_id: str | None = None) -> None:
-    """Simulate Ctrl+V keypress to paste clipboard."""
+    """Simulate Ctrl+V keypress to paste clipboard.
+
+    Uses windowactivate instead of windowfocus for the paste step to
+    reduce Firefox UI freezing. windowactivate brings the window to the
+    foreground without the heavy focus-event processing that windowfocus
+    triggers.
+    """
     session = _detect_session_type()
     if session == "wayland":
         _run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"])
     else:
         if window_id:
-            _focus_window(window_id)
+            _run(["xdotool", "windowactivate", "--sync", window_id])
         _run(["xdotool", "key", "--delay", str(XDOTOOL_KEY_DELAY), "ctrl+v"])
-    time.sleep(COPY_PASTE_DELAY)

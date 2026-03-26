@@ -64,18 +64,27 @@ class TestCaptureSelectedText:
         assert text == "new text"
         assert method == "ctrl_c"
 
-    def test_retries_when_clipboard_unchanged(self):
+    def test_accepts_unchanged_clipboard_immediately(self):
+        with (
+            patch("ai_clip.orchestrator._safe_read_clipboard", return_value="same"),
+            patch("ai_clip.orchestrator.simulate_copy"),
+            patch("ai_clip.orchestrator.read_clipboard", return_value="same"),
+        ):
+            text, method = _capture_selected_text(source_window="123")
+        assert text == "same"
+        assert method == "ctrl_c_unchanged"
+
+    def test_retries_when_clipboard_empty(self):
         call_count = {"n": 0}
-        old_text = "stale"
 
         def read_clipboard_side_effect():
             call_count["n"] += 1
             if call_count["n"] <= 2:
-                return old_text
+                return ""
             return "fresh text"
 
         with (
-            patch("ai_clip.orchestrator._safe_read_clipboard", return_value=old_text),
+            patch("ai_clip.orchestrator._safe_read_clipboard", return_value="old"),
             patch("ai_clip.orchestrator.simulate_copy"),
             patch("ai_clip.orchestrator.read_clipboard", side_effect=read_clipboard_side_effect),
             patch("ai_clip.orchestrator.time.sleep"),
@@ -84,18 +93,7 @@ class TestCaptureSelectedText:
         assert text == "fresh text"
         assert method == "ctrl_c"
 
-    def test_returns_stale_after_all_retries(self):
-        with (
-            patch("ai_clip.orchestrator._safe_read_clipboard", return_value="stale"),
-            patch("ai_clip.orchestrator.simulate_copy"),
-            patch("ai_clip.orchestrator.read_clipboard", return_value="stale"),
-            patch("ai_clip.orchestrator.time.sleep"),
-        ):
-            text, method = _capture_selected_text(source_window="123")
-        assert text == "stale"
-        assert method == "ctrl_c_fallback"
-
-    def test_returns_empty_when_clipboard_empty(self):
+    def test_returns_empty_when_clipboard_empty_after_retries(self):
         with (
             patch("ai_clip.orchestrator._safe_read_clipboard", return_value=""),
             patch("ai_clip.orchestrator.simulate_copy"),

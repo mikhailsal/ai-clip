@@ -1,36 +1,17 @@
 """Tests for the AI client module."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from openai import OpenAIError
 
 from ai_clip.ai_client import (
-    OPENROUTER_BASE_URL,
     SYSTEM_PROMPT,
     AIClientError,
-    _build_client,
     _build_messages,
+    _parse_sse_line,
     transform_text,
 )
-
-
-class TestBuildClient:
-    def test_creates_client_with_key(self):
-        with patch("openai.OpenAI") as mock_cls:
-            _build_client("sk-test")
-            mock_cls.assert_called_once_with(
-                base_url=OPENROUTER_BASE_URL,
-                api_key="sk-test",
-            )
-
-    def test_raises_on_empty_key(self):
-        with pytest.raises(AIClientError, match="not configured"):
-            _build_client("")
-
-    def test_raises_on_none_key(self):
-        with pytest.raises(AIClientError, match="not configured"):
-            _build_client("")
 
 
 class TestBuildMessages:
@@ -45,21 +26,51 @@ class TestBuildMessages:
         assert "---" in messages[1]["content"]
 
 
+class TestParseSSELine:
+    def test_data_with_content(self):
+        data = json.dumps({"choices": [{"delta": {"content": "hello"}}]})
+        assert _parse_sse_line(f"data: {data}") == "hello"
+
+    def test_done_signal(self):
+        assert _parse_sse_line("data: [DONE]") is None
+
+    def test_empty_line(self):
+        assert _parse_sse_line("") is None
+
+    def test_non_data_line(self):
+        assert _parse_sse_line("event: message") is None
+
+    def test_no_choices(self):
+        assert _parse_sse_line("data: {}") is None
+
+    def test_no_delta_content(self):
+        data = json.dumps({"choices": [{"delta": {}}]})
+        assert _parse_sse_line(f"data: {data}") is None
+
+    def test_invalid_json(self):
+        assert _parse_sse_line("data: {invalid") is None
+
+
+def _make_sse_response(chunks: list[str], status: int = 200):
+    """Build a mock HTTP response with SSE data lines."""
+    lines = []
+    for chunk in chunks:
+        data = json.dumps({"choices": [{"delta": {"content": chunk}}]})
+        lines.append(f"data: {data}\n".encode())
+    lines.append(b"data: [DONE]\n")
+    resp = MagicMock()
+    resp.status = status
+    resp.__iter__ = lambda self: iter(lines)
+    resp.__enter__ = lambda self: self
+    resp.__exit__ = lambda self, *a: None
+    resp.close = MagicMock()
+    return resp
+
+
 class TestTransformText:
-    def _mock_response(self, content: str | None = "Transformed"):
-        choice = MagicMock()
-        choice.message.content = content
-        response = MagicMock()
-        response.choices = [choice] if content is not None else []
-        return response
-
     def test_success(self):
-        mock_response = self._mock_response("  Fixed text  ")
-        with patch("ai_clip.ai_client._build_client") as mock_build:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            mock_build.return_value = mock_client
-
+        resp = _make_sse_response(["  Fixed", " text  "])
+        with patch("urllib.request.urlopen", return_value=resp):
             result = transform_text(
                 text="broken text",
                 command_prompt="Fix it",
@@ -69,59 +80,70 @@ class TestTransformText:
             )
             assert result == "Fixed text"
 
-            mock_client.chat.completions.create.assert_called_once()
-            call_kwargs = mock_client.chat.completions.create.call_args[1]
-            assert call_kwargs["model"] == "test-model"
-            assert call_kwargs["timeout"] == 10
-            assert len(call_kwargs["messages"]) == 2
+    def test_raises_on_empty_key(self):
+        with pytest.raises(AIClientError, match="not configured"):
+            transform_text("text", "prompt", "", "model")
 
     def test_api_error(self):
-        with patch("ai_clip.ai_client._build_client") as mock_build:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.side_effect = OpenAIError("fail")
-            mock_build.return_value = mock_client
+        with (
+            patch("urllib.request.urlopen", side_effect=Exception("connection refused")),
+            pytest.raises(AIClientError, match="API request failed"),
+        ):
+            transform_text("text", "prompt", "sk-test", "model")
 
-            with pytest.raises(AIClientError, match="API request failed"):
-                transform_text("text", "prompt", "sk-test", "model")
-
-    def test_no_choices(self):
-        mock_response = MagicMock()
-        mock_response.choices = []
-        with patch("ai_clip.ai_client._build_client") as mock_build:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            mock_build.return_value = mock_client
-
-            with pytest.raises(AIClientError, match="no choices"):
-                transform_text("text", "prompt", "sk-test", "model")
+    def test_http_error_status(self):
+        resp = _make_sse_response([], status=500)
+        with (
+            patch("urllib.request.urlopen", return_value=resp),
+            pytest.raises(AIClientError, match="HTTP 500"),
+        ):
+            transform_text("text", "prompt", "sk-test", "model")
 
     def test_empty_content(self):
-        mock_response = self._mock_response("")
-        with patch("ai_clip.ai_client._build_client") as mock_build:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            mock_build.return_value = mock_client
-
-            with pytest.raises(AIClientError, match="empty content"):
-                transform_text("text", "prompt", "sk-test", "model")
+        resp = _make_sse_response([])
+        with (
+            patch("urllib.request.urlopen", return_value=resp),
+            pytest.raises(AIClientError, match="empty content"),
+        ):
+            transform_text("text", "prompt", "sk-test", "model")
 
     def test_default_timeout(self):
-        mock_response = self._mock_response("result")
-        with patch("ai_clip.ai_client._build_client") as mock_build:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            mock_build.return_value = mock_client
-
+        resp = _make_sse_response(["result"])
+        with patch("urllib.request.urlopen", return_value=resp) as mock_open:
             transform_text("text", "prompt", "sk-test", "model")
-            call_kwargs = mock_client.chat.completions.create.call_args[1]
-            assert call_kwargs["timeout"] == 30
+            assert mock_open.call_args[1]["timeout"] == 30
 
     def test_strips_whitespace(self):
-        mock_response = self._mock_response("\n  result\n  ")
-        with patch("ai_clip.ai_client._build_client") as mock_build:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            mock_build.return_value = mock_client
-
+        resp = _make_sse_response(["\n  result\n  "])
+        with patch("urllib.request.urlopen", return_value=resp):
             result = transform_text("text", "prompt", "sk-test", "model")
             assert result == "result"
+
+    def test_streaming_error_during_iteration(self):
+        def failing_iter():
+            data = json.dumps({"choices": [{"delta": {"content": "partial"}}]})
+            yield f"data: {data}\n".encode()
+            raise ConnectionError("stream broken")
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.__iter__ = lambda self: failing_iter()
+        resp.close = MagicMock()
+
+        with (
+            patch("urllib.request.urlopen", return_value=resp),
+            pytest.raises(AIClientError, match="Streaming failed"),
+        ):
+            transform_text("text", "prompt", "sk-test", "model")
+
+    def test_sends_correct_request(self):
+        resp = _make_sse_response(["ok"])
+        with patch("urllib.request.urlopen", return_value=resp) as mock_open:
+            transform_text("hello", "Fix it", "sk-key", "my-model", timeout=15)
+            req = mock_open.call_args[0][0]
+            body = json.loads(req.data)
+            assert body["model"] == "my-model"
+            assert body["stream"] is True
+            assert len(body["messages"]) == 2
+            assert req.get_header("Authorization") == "Bearer sk-key"
+            assert req.get_header("Content-type") == "application/json"
