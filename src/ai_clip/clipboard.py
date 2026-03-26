@@ -10,7 +10,10 @@ import time
 logger = logging.getLogger(__name__)
 
 COPY_PASTE_DELAY = 0.3
+PRE_COPY_DELAY = 0.05
 XDOTOOL_KEY_DELAY = 50
+COPY_RETRIES = 3
+COPY_RETRY_DELAY = 0.15
 
 
 class ClipboardError(Exception):
@@ -90,21 +93,46 @@ def write_clipboard(text: str) -> None:
         raise ClipboardError(f"{cmd[0]} failed (rc={proc.returncode})")
 
 
-def simulate_copy() -> None:
-    """Simulate Ctrl+C keypress to copy selected text."""
+def _get_active_window_id() -> str | None:
+    """Get the X11 window ID of the currently active window."""
+    try:
+        return _run(["xdotool", "getactivewindow"]).strip()
+    except ClipboardError:
+        return None
+
+
+def _focus_window(window_id: str) -> None:
+    """Focus an X11 window and release stuck modifier keys."""
+    _run(["xdotool", "windowfocus", "--sync", window_id])
+    _run(["xdotool", "keyup", "super", "ctrl", "alt", "shift"])
+
+
+def simulate_copy(window_id: str | None = None) -> None:
+    """Simulate Ctrl+C keypress to copy selected text.
+
+    On X11, refocuses the source window and releases stuck modifier keys
+    before sending the keypress. This works reliably across GTK, Qt, and
+    Chromium apps, unlike --window which sends synthetic events that some
+    toolkit ignore.
+    """
+    time.sleep(PRE_COPY_DELAY)
     session = _detect_session_type()
     if session == "wayland":
         _run(["ydotool", "key", "29:1", "46:1", "46:0", "29:0"])
     else:
+        if window_id:
+            _focus_window(window_id)
         _run(["xdotool", "key", "--delay", str(XDOTOOL_KEY_DELAY), "ctrl+c"])
     time.sleep(COPY_PASTE_DELAY)
 
 
-def simulate_paste() -> None:
+def simulate_paste(window_id: str | None = None) -> None:
     """Simulate Ctrl+V keypress to paste clipboard."""
     session = _detect_session_type()
     if session == "wayland":
         _run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"])
     else:
+        if window_id:
+            _focus_window(window_id)
         _run(["xdotool", "key", "--delay", str(XDOTOOL_KEY_DELAY), "ctrl+v"])
     time.sleep(COPY_PASTE_DELAY)

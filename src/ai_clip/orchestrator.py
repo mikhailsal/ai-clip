@@ -14,9 +14,10 @@ if typing.TYPE_CHECKING:
 
 from ai_clip.ai_client import AIClientError, transform_text
 from ai_clip.clipboard import (
+    COPY_RETRIES,
+    COPY_RETRY_DELAY,
     ClipboardError,
     read_clipboard,
-    read_primary_selection,
     simulate_copy,
     simulate_paste,
     write_clipboard,
@@ -37,26 +38,46 @@ def _truncate(text: str) -> str:
     return repr(text[:_TRUNCATE_LEN]) + f"... ({len(text)} chars total)"
 
 
-def _capture_selected_text() -> tuple[str, str]:
-    """Capture the currently selected text, trying primary selection first.
+def _capture_selected_text(source_window: str | None = None) -> tuple[str, str]:
+    """Capture the currently selected text using Ctrl+C.
 
-    The X11 primary selection contains highlighted text without needing Ctrl+C.
-    Falls back to Ctrl+C if primary selection is empty.
+    Uses a robust approach: saves old clipboard, simulates Ctrl+C targeting
+    the source window, then reads back. Retries if clipboard didn't change,
+    because some apps (Chrome) need more time.
 
-    Returns (text, capture_method) where capture_method is 'primary_selection' or 'ctrl_c'.
+    Args:
+        source_window: X11 window ID captured at program start, before focus shifts.
+
+    Returns (text, capture_method).
     """
-    try:
-        primary = read_primary_selection()
-        if primary.strip():
-            logger.debug("Captured text via primary selection (highlighted text)")
-            return primary, "primary_selection"
-    except ClipboardError:
-        logger.debug("Primary selection unavailable, falling back to Ctrl+C")
+    old_clipboard = _safe_read_clipboard()
 
-    simulate_copy()
+    for attempt in range(COPY_RETRIES):
+        simulate_copy(source_window)
+        text = read_clipboard()
+
+        if text.strip() and text != old_clipboard:
+            logger.debug("Captured text via Ctrl+C (attempt %d)", attempt + 1)
+            return text, "ctrl_c"
+
+        if attempt < COPY_RETRIES - 1:
+            logger.debug("Clipboard unchanged after Ctrl+C, retrying (attempt %d)", attempt + 1)
+            time.sleep(COPY_RETRY_DELAY)
+
     text = read_clipboard()
-    logger.debug("Captured text via Ctrl+C (clipboard)")
-    return text, "ctrl_c"
+    if text.strip():
+        logger.debug("Using clipboard content after retries (may be stale)")
+        return text, "ctrl_c_fallback"
+
+    return "", "ctrl_c_empty"
+
+
+def _safe_read_clipboard() -> str:
+    """Read clipboard, returning empty string on any error."""
+    try:
+        return read_clipboard()
+    except ClipboardError:
+        return ""
 
 
 def _find_prompt_for_command(label: str, config: AppConfig) -> tuple[str, str | None]:
@@ -107,7 +128,7 @@ def _do_transform(
     return result
 
 
-def run_with_picker(config_path: Path | None = None) -> bool:
+def run_with_picker(config_path: Path | None = None, source_window: str | None = None) -> bool:
     """Full interactive flow: copy -> pick command -> AI -> paste.
 
     Returns True on success, False on cancellation or error.
@@ -118,7 +139,7 @@ def run_with_picker(config_path: Path | None = None) -> bool:
     commands = build_command_list(config.pinned_commands, history)
 
     try:
-        original_text, capture_method = _capture_selected_text()
+        original_text, capture_method = _capture_selected_text(source_window)
     except ClipboardError as exc:
         logger.error("Failed to read clipboard: %s", exc)
         return False
@@ -146,11 +167,18 @@ def run_with_picker(config_path: Path | None = None) -> bool:
     )
 
     return _execute_transform(
-        original_text, picker_result.command, config, history, picker_result.trigger
+        original_text,
+        picker_result.command,
+        config,
+        history,
+        picker_result.trigger,
+        source_window=source_window,
     )
 
 
-def run_direct_command(command_label: str, config_path: Path | None = None) -> bool:
+def run_direct_command(
+    command_label: str, config_path: Path | None = None, source_window: str | None = None
+) -> bool:
     """Direct command execution without picker (for dedicated hotkeys).
 
     Returns True on success, False on error.
@@ -160,7 +188,7 @@ def run_direct_command(command_label: str, config_path: Path | None = None) -> b
     history = load_history()
 
     try:
-        original_text, capture_method = _capture_selected_text()
+        original_text, capture_method = _capture_selected_text(source_window)
     except ClipboardError as exc:
         logger.error("Failed to read clipboard: %s", exc)
         return False
@@ -176,7 +204,9 @@ def run_direct_command(command_label: str, config_path: Path | None = None) -> b
         _truncate(original_text),
     )
 
-    return _execute_transform(original_text, command_label, config, history, "direct_hotkey")
+    return _execute_transform(
+        original_text, command_label, config, history, "direct_hotkey", source_window=source_window
+    )
 
 
 def _execute_transform(
@@ -185,6 +215,7 @@ def _execute_transform(
     config: AppConfig,
     history,
     trigger: str = "",
+    source_window: str | None = None,
 ) -> bool:
     """Transform text and paste the result. Updates history on success."""
     logger.debug("Execute transform: command=%r, trigger=%s", command_label, trigger or "unknown")
@@ -197,7 +228,7 @@ def _execute_transform(
 
     try:
         write_clipboard(result)
-        simulate_paste()
+        simulate_paste(source_window)
     except ClipboardError as exc:
         logger.error("Failed to paste result: %s", exc)
         return False

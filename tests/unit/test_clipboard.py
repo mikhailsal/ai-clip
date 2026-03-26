@@ -8,6 +8,8 @@ import pytest
 from ai_clip.clipboard import (
     ClipboardError,
     _detect_session_type,
+    _focus_window,
+    _get_active_window_id,
     _run,
     read_clipboard,
     read_primary_selection,
@@ -177,45 +179,98 @@ class TestWriteClipboard:
             write_clipboard("hello")
 
 
+class TestGetActiveWindowId:
+    def test_returns_id(self):
+        with patch("ai_clip.clipboard._run", return_value="12345\n"):
+            assert _get_active_window_id() == "12345"
+
+    def test_returns_none_on_error(self):
+        with patch("ai_clip.clipboard._run", side_effect=ClipboardError("fail")):
+            assert _get_active_window_id() is None
+
+
+class TestFocusWindow:
+    def test_focuses_and_releases_keys(self):
+        with patch("ai_clip.clipboard._run") as mock_run:
+            _focus_window("12345")
+        assert mock_run.call_count == 2
+        mock_run.assert_any_call(["xdotool", "windowfocus", "--sync", "12345"])
+        mock_run.assert_any_call(["xdotool", "keyup", "super", "ctrl", "alt", "shift"])
+
+
 class TestSimulateCopy:
-    def test_x11(self):
+    def test_x11_no_window(self):
         with (
             patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
+            patch("ai_clip.clipboard._focus_window") as mock_focus,
             patch("ai_clip.clipboard._run") as mock_run,
-            patch("ai_clip.clipboard.time.sleep") as mock_sleep,
+            patch("ai_clip.clipboard.time.sleep"),
         ):
             simulate_copy()
+            mock_focus.assert_not_called()
             mock_run.assert_called_once_with(["xdotool", "key", "--delay", "50", "ctrl+c"])
-            mock_sleep.assert_called_once_with(0.3)
+
+    def test_x11_with_window_id(self):
+        with (
+            patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
+            patch("ai_clip.clipboard._focus_window") as mock_focus,
+            patch("ai_clip.clipboard._run") as mock_run,
+            patch("ai_clip.clipboard.time.sleep"),
+        ):
+            simulate_copy(window_id="12345")
+            mock_focus.assert_called_once_with("12345")
+            mock_run.assert_called_once_with(["xdotool", "key", "--delay", "50", "ctrl+c"])
 
     def test_wayland(self):
         with (
             patch("ai_clip.clipboard._detect_session_type", return_value="wayland"),
             patch("ai_clip.clipboard._run") as mock_run,
-            patch("ai_clip.clipboard.time.sleep") as mock_sleep,
+            patch("ai_clip.clipboard.time.sleep"),
         ):
             simulate_copy()
             mock_run.assert_called_once_with(["ydotool", "key", "29:1", "46:1", "46:0", "29:0"])
-            mock_sleep.assert_called_once_with(0.3)
+
+    def test_pre_delay(self):
+        with (
+            patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
+            patch("ai_clip.clipboard._focus_window"),
+            patch("ai_clip.clipboard._run"),
+            patch("ai_clip.clipboard.time.sleep") as mock_sleep,
+        ):
+            simulate_copy()
+            assert mock_sleep.call_count == 2
+            mock_sleep.assert_any_call(0.05)
+            mock_sleep.assert_any_call(0.3)
 
 
 class TestSimulatePaste:
-    def test_x11(self):
+    def test_x11_no_window(self):
         with (
             patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
+            patch("ai_clip.clipboard._focus_window") as mock_focus,
             patch("ai_clip.clipboard._run") as mock_run,
-            patch("ai_clip.clipboard.time.sleep") as mock_sleep,
+            patch("ai_clip.clipboard.time.sleep"),
         ):
             simulate_paste()
+            mock_focus.assert_not_called()
             mock_run.assert_called_once_with(["xdotool", "key", "--delay", "50", "ctrl+v"])
-            mock_sleep.assert_called_once_with(0.3)
+
+    def test_x11_with_window_id(self):
+        with (
+            patch("ai_clip.clipboard._detect_session_type", return_value="x11"),
+            patch("ai_clip.clipboard._focus_window") as mock_focus,
+            patch("ai_clip.clipboard._run") as mock_run,
+            patch("ai_clip.clipboard.time.sleep"),
+        ):
+            simulate_paste(window_id="12345")
+            mock_focus.assert_called_once_with("12345")
+            mock_run.assert_called_once_with(["xdotool", "key", "--delay", "50", "ctrl+v"])
 
     def test_wayland(self):
         with (
             patch("ai_clip.clipboard._detect_session_type", return_value="wayland"),
             patch("ai_clip.clipboard._run") as mock_run,
-            patch("ai_clip.clipboard.time.sleep") as mock_sleep,
+            patch("ai_clip.clipboard.time.sleep"),
         ):
             simulate_paste()
             mock_run.assert_called_once_with(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"])
-            mock_sleep.assert_called_once_with(0.3)

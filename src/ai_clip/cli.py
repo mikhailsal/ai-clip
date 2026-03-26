@@ -110,6 +110,10 @@ def _setup_hotkeys(config_path: Path | None) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
+    from ai_clip.clipboard import _get_active_window_id
+
+    source_window = _get_active_window_id()
+
     parser = build_parser()
     args = parser.parse_args(argv)
     _setup_logging(args.verbose)
@@ -125,9 +129,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command:
-        success = run_direct_command(args.command, config_path)
+        success = run_direct_command(args.command, config_path, source_window=source_window)
     else:
-        success = run_with_picker(config_path)
+        success = run_with_picker(config_path, source_window=source_window)
 
     return 0 if success else 1
 

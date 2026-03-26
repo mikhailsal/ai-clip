@@ -56,8 +56,11 @@ class TestSetupLogging:
         root.setLevel(logging.NOTSET)
         _setup_logging(True)
         assert root.level == logging.DEBUG
-        console_handlers = [h for h in root.handlers if isinstance(h, logging.StreamHandler)
-                            and not hasattr(h, "baseFilename")]
+        console_handlers = [
+            h
+            for h in root.handlers
+            if isinstance(h, logging.StreamHandler) and not hasattr(h, "baseFilename")
+        ]
         assert any(h.level == logging.DEBUG for h in console_handlers)
         root.handlers.clear()
 
@@ -69,8 +72,11 @@ class TestSetupLogging:
         root.setLevel(logging.NOTSET)
         _setup_logging(False)
         assert root.level == logging.DEBUG
-        console_handlers = [h for h in root.handlers if isinstance(h, logging.StreamHandler)
-                            and not hasattr(h, "baseFilename")]
+        console_handlers = [
+            h
+            for h in root.handlers
+            if isinstance(h, logging.StreamHandler) and not hasattr(h, "baseFilename")
+        ]
         assert any(h.level == logging.WARNING for h in console_handlers)
         root.handlers.clear()
 
@@ -148,27 +154,40 @@ class TestMain:
         mock_setup.assert_called_once()
 
     def test_direct_command_success(self):
-        with patch("ai_clip.cli.run_direct_command", return_value=True):
+        with (
+            patch("ai_clip.clipboard._get_active_window_id", return_value="1"),
+            patch("ai_clip.cli.run_direct_command", return_value=True),
+        ):
             result = main(["--command", "Fix"])
         assert result == 0
 
     def test_direct_command_failure(self):
-        with patch("ai_clip.cli.run_direct_command", return_value=False):
+        with (
+            patch("ai_clip.clipboard._get_active_window_id", return_value="1"),
+            patch("ai_clip.cli.run_direct_command", return_value=False),
+        ):
             result = main(["--command", "Fix"])
         assert result == 1
 
     def test_picker_success(self):
-        with patch("ai_clip.cli.run_with_picker", return_value=True):
+        with (
+            patch("ai_clip.clipboard._get_active_window_id", return_value="1"),
+            patch("ai_clip.cli.run_with_picker", return_value=True),
+        ):
             result = main([])
         assert result == 0
 
     def test_picker_failure(self):
-        with patch("ai_clip.cli.run_with_picker", return_value=False):
+        with (
+            patch("ai_clip.clipboard._get_active_window_id", return_value="1"),
+            patch("ai_clip.cli.run_with_picker", return_value=False),
+        ):
             result = main([])
         assert result == 1
 
     def test_verbose_flag(self):
         with (
+            patch("ai_clip.clipboard._get_active_window_id", return_value="1"),
             patch("ai_clip.cli.run_with_picker", return_value=True),
             patch("ai_clip.cli._setup_logging") as mock_log,
         ):
@@ -176,6 +195,17 @@ class TestMain:
         mock_log.assert_called_once_with(True)
 
     def test_config_path_passed(self):
-        with patch("ai_clip.cli.run_with_picker", return_value=True) as mock_run:
+        with (
+            patch("ai_clip.clipboard._get_active_window_id", return_value="1"),
+            patch("ai_clip.cli.run_with_picker", return_value=True) as mock_run,
+        ):
             main(["--config", "/tmp/c.toml"])
-        mock_run.assert_called_once_with("/tmp/c.toml")
+        mock_run.assert_called_once_with("/tmp/c.toml", source_window="1")
+
+    def test_source_window_passed_to_direct(self):
+        with (
+            patch("ai_clip.clipboard._get_active_window_id", return_value="42"),
+            patch("ai_clip.cli.run_direct_command", return_value=True) as mock_run,
+        ):
+            main(["--command", "Fix"])
+        mock_run.assert_called_once_with("Fix", None, source_window="42")

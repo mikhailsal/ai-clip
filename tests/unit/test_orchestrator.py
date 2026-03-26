@@ -10,6 +10,7 @@ from ai_clip.orchestrator import (
     _do_transform,
     _execute_transform,
     _find_prompt_for_command,
+    _safe_read_clipboard,
     _truncate,
     run_direct_command,
     run_with_picker,
@@ -42,35 +43,77 @@ class TestTruncate:
         assert result.startswith("'")
 
 
+class TestSafeReadClipboard:
+    def test_reads_clipboard(self):
+        with patch("ai_clip.orchestrator.read_clipboard", return_value="content"):
+            assert _safe_read_clipboard() == "content"
+
+    def test_returns_empty_on_error(self):
+        with patch("ai_clip.orchestrator.read_clipboard", side_effect=ClipboardError("fail")):
+            assert _safe_read_clipboard() == ""
+
+
 class TestCaptureSelectedText:
-    def test_uses_primary_selection(self):
-        with patch("ai_clip.orchestrator.read_primary_selection", return_value="selected"):
-            text, method = _capture_selected_text()
-        assert text == "selected"
-        assert method == "primary_selection"
-
-    def test_falls_back_to_ctrl_c(self):
+    def test_captures_on_first_try(self):
         with (
-            patch("ai_clip.orchestrator.read_primary_selection", return_value=""),
+            patch("ai_clip.orchestrator._safe_read_clipboard", return_value="old text"),
             patch("ai_clip.orchestrator.simulate_copy"),
-            patch("ai_clip.orchestrator.read_clipboard", return_value="copied"),
+            patch("ai_clip.orchestrator.read_clipboard", return_value="new text"),
         ):
-            text, method = _capture_selected_text()
-        assert text == "copied"
+            text, method = _capture_selected_text(source_window="123")
+        assert text == "new text"
         assert method == "ctrl_c"
 
-    def test_falls_back_on_primary_error(self):
+    def test_retries_when_clipboard_unchanged(self):
+        call_count = {"n": 0}
+        old_text = "stale"
+
+        def read_clipboard_side_effect():
+            call_count["n"] += 1
+            if call_count["n"] <= 2:
+                return old_text
+            return "fresh text"
+
         with (
-            patch(
-                "ai_clip.orchestrator.read_primary_selection",
-                side_effect=ClipboardError("fail"),
-            ),
+            patch("ai_clip.orchestrator._safe_read_clipboard", return_value=old_text),
             patch("ai_clip.orchestrator.simulate_copy"),
-            patch("ai_clip.orchestrator.read_clipboard", return_value="copied"),
+            patch("ai_clip.orchestrator.read_clipboard", side_effect=read_clipboard_side_effect),
+            patch("ai_clip.orchestrator.time.sleep"),
         ):
-            text, method = _capture_selected_text()
-        assert text == "copied"
+            text, method = _capture_selected_text(source_window="123")
+        assert text == "fresh text"
         assert method == "ctrl_c"
+
+    def test_returns_stale_after_all_retries(self):
+        with (
+            patch("ai_clip.orchestrator._safe_read_clipboard", return_value="stale"),
+            patch("ai_clip.orchestrator.simulate_copy"),
+            patch("ai_clip.orchestrator.read_clipboard", return_value="stale"),
+            patch("ai_clip.orchestrator.time.sleep"),
+        ):
+            text, method = _capture_selected_text(source_window="123")
+        assert text == "stale"
+        assert method == "ctrl_c_fallback"
+
+    def test_returns_empty_when_clipboard_empty(self):
+        with (
+            patch("ai_clip.orchestrator._safe_read_clipboard", return_value=""),
+            patch("ai_clip.orchestrator.simulate_copy"),
+            patch("ai_clip.orchestrator.read_clipboard", return_value=""),
+            patch("ai_clip.orchestrator.time.sleep"),
+        ):
+            text, method = _capture_selected_text(source_window=None)
+        assert text == ""
+        assert method == "ctrl_c_empty"
+
+    def test_passes_window_id_to_copy(self):
+        with (
+            patch("ai_clip.orchestrator._safe_read_clipboard", return_value="old"),
+            patch("ai_clip.orchestrator.simulate_copy") as mock_copy,
+            patch("ai_clip.orchestrator.read_clipboard", return_value="new"),
+        ):
+            _capture_selected_text(source_window="999")
+        mock_copy.assert_called_with("999")
 
 
 class TestFindPromptForCommand:
