@@ -7,6 +7,8 @@ import pytest
 import tomli_w
 
 from ai_clip.config import (
+    DEFAULT_ACKNOWLEDGE_SOUND,
+    DEFAULT_SOUND_ENABLED,
     AppConfig,
     ConfigError,
     PinnedCommand,
@@ -141,6 +143,28 @@ class TestLoadConfig:
             cfg = load_config(None)
         assert cfg.config_path == DEFAULT_CONFIG_PATH
 
+    def test_sound_config(self, tmp_path):
+        config_path = tmp_path / "config.toml"
+        _write_toml(
+            config_path,
+            {
+                "sound": {
+                    "enabled": False,
+                    "acknowledge_sound": "/custom/beep.oga",
+                },
+            },
+        )
+        cfg = load_config(config_path)
+        assert cfg.sound_enabled is False
+        assert cfg.sound_acknowledge == "/custom/beep.oga"
+
+    def test_sound_defaults_when_missing(self, tmp_path):
+        config_path = tmp_path / "config.toml"
+        _write_toml(config_path, {})
+        cfg = load_config(config_path)
+        assert cfg.sound_enabled is DEFAULT_SOUND_ENABLED
+        assert cfg.sound_acknowledge == DEFAULT_ACKNOWLEDGE_SOUND
+
 
 class TestGenerateDefaultConfig:
     def test_creates_config(self, tmp_path):
@@ -176,3 +200,5 @@ class TestDataclasses:
         assert cfg.openrouter_api_key == ""
         assert cfg.pinned_commands == []
         assert cfg.timeout_seconds == 30
+        assert cfg.sound_enabled is True
+        assert cfg.sound_acknowledge == DEFAULT_ACKNOWLEDGE_SOUND

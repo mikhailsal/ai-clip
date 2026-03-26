@@ -35,6 +35,8 @@ DEFAULT_HISTORY_PATH = PROJECT_DIR / "history.json"
 DEFAULT_MODEL = "google/gemini-2.0-flash-001"
 DEFAULT_TIMEOUT = 30
 DEFAULT_MAIN_HOTKEY = "<Super><Shift>a"
+DEFAULT_SOUND_ENABLED = True
+DEFAULT_ACKNOWLEDGE_SOUND = "/usr/share/sounds/freedesktop/stereo/message.oga"
 
 
 @dataclass
@@ -51,6 +53,8 @@ class AppConfig:
     default_model: str = DEFAULT_MODEL
     timeout_seconds: int = DEFAULT_TIMEOUT
     main_hotkey: str = DEFAULT_MAIN_HOTKEY
+    sound_enabled: bool = DEFAULT_SOUND_ENABLED
+    sound_acknowledge: str = DEFAULT_ACKNOWLEDGE_SOUND
     pinned_commands: list[PinnedCommand] = field(default_factory=list)
     config_path: Path = DEFAULT_CONFIG_PATH
 
@@ -100,6 +104,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
 
     api_section = data.get("api", {})
     commands_section = data.get("commands", {})
+    sound_section = data.get("sound", {})
 
     api_key = api_section.get(
         "openrouter_api_key",
@@ -112,6 +117,9 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     timeout = api_section.get("timeout_seconds", DEFAULT_TIMEOUT)
     main_hotkey = data.get("main_hotkey", DEFAULT_MAIN_HOTKEY)
 
+    sound_enabled = sound_section.get("enabled", DEFAULT_SOUND_ENABLED)
+    sound_acknowledge = sound_section.get("acknowledge_sound", DEFAULT_ACKNOWLEDGE_SOUND)
+
     pinned = _parse_pinned_commands(commands_section.get("pinned", []))
 
     return AppConfig(
@@ -119,6 +127,8 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         default_model=default_model,
         timeout_seconds=int(timeout),
         main_hotkey=main_hotkey,
+        sound_enabled=sound_enabled,
+        sound_acknowledge=sound_acknowledge,
         pinned_commands=pinned,
         config_path=path,
     )

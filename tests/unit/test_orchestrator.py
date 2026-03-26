@@ -168,21 +168,39 @@ class TestExecuteTransform:
         config = _make_config()
         history = MagicMock()
         with (
+            patch("ai_clip.orchestrator.play_sound") as mock_sound,
             patch("ai_clip.orchestrator._do_transform", return_value="result"),
             patch("ai_clip.orchestrator.write_clipboard") as mock_write,
             patch("ai_clip.orchestrator.simulate_paste") as mock_paste,
         ):
             result = _execute_transform("text", "Fix", config, history)
         assert result is True
+        mock_sound.assert_called_once_with(config.sound_acknowledge)
         mock_write.assert_called_once_with("result")
         mock_paste.assert_called_once()
         history.record_usage.assert_called_once_with("Fix")
         history.save.assert_called_once()
 
+    def test_sound_disabled(self):
+        config = _make_config(sound_enabled=False)
+        history = MagicMock()
+        with (
+            patch("ai_clip.orchestrator.play_sound") as mock_sound,
+            patch("ai_clip.orchestrator._do_transform", return_value="result"),
+            patch("ai_clip.orchestrator.write_clipboard"),
+            patch("ai_clip.orchestrator.simulate_paste"),
+        ):
+            result = _execute_transform("text", "Fix", config, history)
+        assert result is True
+        mock_sound.assert_not_called()
+
     def test_ai_error(self):
         config = _make_config()
         history = MagicMock()
-        with patch("ai_clip.orchestrator._do_transform", side_effect=AIClientError("fail")):
+        with (
+            patch("ai_clip.orchestrator.play_sound"),
+            patch("ai_clip.orchestrator._do_transform", side_effect=AIClientError("fail")),
+        ):
             result = _execute_transform("text", "Fix", config, history)
         assert result is False
         history.record_usage.assert_not_called()
@@ -191,6 +209,7 @@ class TestExecuteTransform:
         config = _make_config()
         history = MagicMock()
         with (
+            patch("ai_clip.orchestrator.play_sound"),
             patch("ai_clip.orchestrator._do_transform", return_value="result"),
             patch("ai_clip.orchestrator.write_clipboard", side_effect=ClipboardError("fail")),
         ):

@@ -25,6 +25,7 @@ from ai_clip.clipboard import (
 from ai_clip.config import AppConfig, load_config
 from ai_clip.history import build_command_list, load_history
 from ai_clip.picker import PickerResult, show_picker
+from ai_clip.sound import play_sound
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +220,9 @@ def _execute_transform(
 ) -> bool:
     """Transform text and paste the result. Updates history on success."""
     logger.debug("Execute transform: command=%r, trigger=%s", command_label, trigger or "unknown")
+
+    if config.sound_enabled:
+        play_sound(config.sound_acknowledge)
 
     try:
         result = _do_transform(text, command_label, config)
